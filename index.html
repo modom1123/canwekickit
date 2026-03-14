@@ -252,6 +252,12 @@
 
       const selectedDateLabel = selectedDay ? `${MONTH_NAMES[currentMonth]} ${selectedDay}, ${currentYear}` : "";
 
+      const upcomingHangoutEntries = Object.entries(hangoutDays).filter(([day]) => {
+        const d = new Date(currentYear, currentMonth, parseInt(day));
+        const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        return d >= t;
+      });
+
       const hangoutDayOptions = Object.keys(hangoutDays).map((d) => {
         const dateObj = new Date(currentYear, currentMonth, parseInt(d));
         const dayName = dateObj.toLocaleDateString("en-US", { weekday: "short" });
@@ -454,18 +460,18 @@
                     }}>▶</span>
                     available days & times
                     <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 400, color: "#94a3b8" }}>
-                      {Object.keys(hangoutDays).length} day{Object.keys(hangoutDays).length !== 1 ? "s" : ""}
+                      {upcomingHangoutEntries.length} day{upcomingHangoutEntries.length !== 1 ? "s" : ""}
                     </span>
                   </button>
 
                   {availListOpen && (
-                    Object.keys(hangoutDays).length === 0 ? (
+                    upcomingHangoutEntries.length === 0 ? (
                       <p style={{ color: "#94a3b8", fontSize: 14, fontStyle: "italic", padding: "4px 0" }}>
-                        no days with 3+ hours of shared availability this month
+                        no upcoming days with 3+ hours of shared availability this month
                       </p>
                     ) : (
                       <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                        {Object.entries(hangoutDays).map(([day, slots]) => {
+                        {upcomingHangoutEntries.map(([day, slots]) => {
                           const dateObj = new Date(currentYear, currentMonth, parseInt(day));
                           const dayName = dateObj.toLocaleDateString("en-US", { weekday: "long" });
                           const totalHrs = slots.reduce((s, sl) => s + (sl.end - sl.start), 0);
