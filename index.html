@@ -102,6 +102,7 @@
       const [availListOpen, setAvailListOpen] = useState(true);
       const [loading, setLoading] = useState(true);
       const [myName, setMyName] = useState("");
+      const [hangWith, setHangWith] = useState([]);
 
       const [proposalPerson, setProposalPerson] = useState("");
       const [proposalDay, setProposalDay] = useState("");
@@ -232,9 +233,14 @@
       const getAvailableSlots = useCallback(
         (dateKey) => {
           if (people.length < 2 || !myName) return [];
+          const targetPeople = hangWith.length > 0
+            ? people.filter((p) => hangWith.includes(p.name))
+            : people.filter((p) => p.name !== myName);
+          if (targetPeople.length === 0) return [];
+
           const timePoints = new Set([DEFAULT_DAY_START, DEFAULT_DAY_END]);
-          people.forEach((p) => {
-            const entries = busyTimes[p.name]?.[dateKey] || [];
+          [myName, ...targetPeople.map((p) => p.name)].forEach((name) => {
+            const entries = busyTimes[name]?.[dateKey] || [];
             entries.forEach((e) => {
               const s = parseTime(e.start);
               const en = parseTime(e.end);
@@ -244,32 +250,23 @@
           });
           const sorted = [...timePoints].sort((a, b) => a - b);
 
+          const isBusyAt = (name, mid) => {
+            const entries = busyTimes[name]?.[dateKey] || [];
+            return entries.some((e) => {
+              const s = parseTime(e.start);
+              const en = parseTime(e.end);
+              return s <= mid && en > mid;
+            });
+          };
+
           const freeIntervals = [];
           for (let i = 0; i < sorted.length - 1; i++) {
             const start = sorted[i];
             const end = sorted[i + 1];
             const mid = (start + end) / 2;
-            // Check if I'm free at this time
-            const myEntries = busyTimes[myName]?.[dateKey] || [];
-            const imBusy = myEntries.some((e) => {
-              const s = parseTime(e.start);
-              const en = parseTime(e.end);
-              return s <= mid && en > mid;
-            });
-            if (imBusy) continue;
-            // Check if at least 1 OTHER person is also free
-            let otherFree = false;
-            for (const p of people) {
-              if (p.name === myName) continue;
-              const entries = busyTimes[p.name]?.[dateKey] || [];
-              const isBusy = entries.some((e) => {
-                const s = parseTime(e.start);
-                const en = parseTime(e.end);
-                return s <= mid && en > mid;
-              });
-              if (!isBusy) { otherFree = true; break; }
-            }
-            if (otherFree) freeIntervals.push({ start, end });
+            if (isBusyAt(myName, mid)) continue;
+            const someoneFree = targetPeople.some((p) => !isBusyAt(p.name, mid));
+            if (someoneFree) freeIntervals.push({ start, end });
           }
 
           const merged = [];
@@ -282,7 +279,7 @@
           }
           return merged;
         },
-        [people, busyTimes, myName]
+        [people, busyTimes, myName, hangWith]
       );
 
       const hangoutDays = useMemo(() => {
@@ -295,7 +292,7 @@
           if (totalHours >= 3) result[d] = slots;
         }
         return result;
-      }, [people, busyTimes, currentMonth, currentYear, daysInMonth, getAvailableSlots, myName]);
+      }, [people, busyTimes, currentMonth, currentYear, daysInMonth, getAvailableSlots, myName, hangWith]);
 
       const prevMonth = () => {
         if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(currentYear - 1); }
@@ -489,7 +486,7 @@
                     <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 6 }}>who are you?</label>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {people.map((p) => (
-                        <button key={p.name} onClick={() => setMyName(p.name)} style={{
+                        <button key={p.name} onClick={() => { setMyName(p.name); setHangWith([]); }} style={{
                           padding: "7px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
                           background: myName === p.name ? p.color + "18" : "#f8fafc",
                           border: myName === p.name ? `2px solid ${p.color}` : "2px solid #e2e8f0",
@@ -504,7 +501,36 @@
                     <p style={{ color: "#94a3b8", fontSize: 14, fontStyle: "italic" }}>select your name above to see overlapping availability</p>
                   ) : (
                   <>
-                  {/* Mini calendar */}
+                  {/* Who do you want to hang with */}
+                  <div style={{ marginBottom: 18 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 6 }}>who do you want to hang with?</label>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                      {people.filter((p) => p.name !== myName).map((p) => {
+                        const selected = hangWith.includes(p.name);
+                        return (
+                          <button key={p.name} onClick={() => {
+                            setHangWith(selected ? hangWith.filter((n) => n !== p.name) : [...hangWith, p.name]);
+                          }} style={{
+                            padding: "7px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                            background: selected ? p.color + "18" : "#f8fafc",
+                            border: selected ? `2px solid ${p.color}` : "2px solid #e2e8f0",
+                            color: selected ? p.color : "#64748b",
+                            cursor: "pointer", transition: "all 0.15s",
+                          }}>{p.name}</button>
+                        );
+                      })}
+                      {hangWith.length > 0 && (
+                        <button onClick={() => setHangWith([])} style={{
+                          padding: "7px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                          background: "transparent", border: "1px solid #e2e8f0",
+                          color: "#94a3b8", cursor: "pointer",
+                        }}>clear</button>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>
+                      {hangWith.length === 0 ? "none selected — showing overlap with anyone" : `showing overlap with ${hangWith.join(", ")}`}
+                    </p>
+                  </div>
                   <div style={{ marginBottom: 20 }}>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 2 }}>
                       {DAYS_OF_WEEK.map((d) => (
