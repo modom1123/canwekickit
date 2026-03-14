@@ -8,6 +8,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #f8fafc; }
@@ -15,8 +17,21 @@
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyDMEbkXMghCBPdaiT3JNoVBzSpEOB0chbc",
+      authDomain: "can-we-kick-it.firebaseapp.com",
+      databaseURL: "https://can-we-kick-it-default-rtdb.firebaseio.com",
+      projectId: "can-we-kick-it",
+      storageBucket: "can-we-kick-it.firebasestorage.app",
+      messagingSenderId: "221903524757",
+      appId: "1:221903524757:web:66d58e49727f96ccf09c9c"
+    });
+    window.db = firebase.database();
+  </script>
   <script type="text/babel">
-    const { useState, useMemo, useCallback } = React;
+    const { useState, useMemo, useCallback, useEffect } = React;
+    const db = window.db;
 
     const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -37,19 +52,12 @@
     const DEFAULT_DAY_START = 8;
     const DEFAULT_DAY_END = 23;
 
-    function getDaysInMonth(year, month) {
-      return new Date(year, month + 1, 0).getDate();
-    }
-    function getFirstDayOfMonth(year, month) {
-      return new Date(year, month, 1).getDay();
-    }
+    function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
+    function getFirstDayOfMonth(year, month) { return new Date(year, month, 1).getDay(); }
     function formatDate(year, month, day) {
       return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
-    function parseTime(str) {
-      const [h, m] = str.split(":").map(Number);
-      return h + m / 60;
-    }
+    function parseTime(str) { const [h, m] = str.split(":").map(Number); return h + m / 60; }
     function formatTimeDisplay(hours) {
       const h = Math.floor(hours);
       const m = Math.round((hours - h) * 60);
@@ -92,6 +100,7 @@
       const [timeEnd, setTimeEnd] = useState("17:00");
       const [editingEntry, setEditingEntry] = useState(null);
       const [availListOpen, setAvailListOpen] = useState(true);
+      const [loading, setLoading] = useState(true);
 
       const [proposalPerson, setProposalPerson] = useState("");
       const [proposalDay, setProposalDay] = useState("");
@@ -100,22 +109,44 @@
       const [proposalNotes, setProposalNotes] = useState("");
       const [proposals, setProposals] = useState([]);
 
+      // Real-time Firebase listeners
+      useEffect(() => {
+        const peopleRef = db.ref("people");
+        const busyRef = db.ref("busyTimes");
+        const proposalsRef = db.ref("proposals");
+
+        peopleRef.on("value", (snap) => {
+          setPeople(snap.val() ? Object.values(snap.val()) : []);
+          setLoading(false);
+        });
+        busyRef.on("value", (snap) => {
+          setBusyTimes(snap.val() || {});
+        });
+        proposalsRef.on("value", (snap) => {
+          setProposals(snap.val() ? Object.values(snap.val()) : []);
+        });
+
+        return () => { peopleRef.off(); busyRef.off(); proposalsRef.off(); };
+      }, []);
+
       const usedColors = people.map((p) => p.color);
 
       const addPerson = () => {
         const trimmed = newName.trim();
         if (!trimmed || people.find((p) => p.name === trimmed)) return;
-        setPeople([...people, { name: trimmed, color: selectedColor }]);
+        const updated = [...people, { name: trimmed, color: selectedColor }];
+        db.ref("people").set(updated);
         setNewName("");
         const next = COLOR_OPTIONS.find((c) => !usedColors.includes(c.value) && c.value !== selectedColor);
         if (next) setSelectedColor(next.value);
       };
 
       const removePerson = (name) => {
-        setPeople(people.filter((p) => p.name !== name));
+        const updated = people.filter((p) => p.name !== name);
+        db.ref("people").set(updated.length > 0 ? updated : null);
         const newBusy = { ...busyTimes };
         delete newBusy[name];
-        setBusyTimes(newBusy);
+        db.ref("busyTimes").set(Object.keys(newBusy).length > 0 ? newBusy : null);
       };
 
       const openAddBusy = (day, person) => {
@@ -142,7 +173,7 @@
       const saveBusy = () => {
         if (!selectedPerson || !selectedDay) return;
         const dateKey = formatDate(currentYear, currentMonth, selectedDay);
-        const newBusy = { ...busyTimes };
+        const newBusy = JSON.parse(JSON.stringify(busyTimes));
         if (editingEntry) {
           const { personName, dateKey: dk, entryIndex } = editingEntry;
           if (newBusy[personName]?.[dk]) {
@@ -153,20 +184,38 @@
           if (!newBusy[selectedPerson.name][dateKey]) newBusy[selectedPerson.name][dateKey] = [];
           newBusy[selectedPerson.name][dateKey].push({ start: timeStart, end: timeEnd });
         }
-        setBusyTimes(newBusy);
+        db.ref("busyTimes").set(newBusy);
         setModalOpen(false);
       };
 
       const deleteBusyEntry = () => {
         if (!editingEntry) return;
         const { personName, dateKey, entryIndex } = editingEntry;
-        const newBusy = { ...busyTimes };
+        const newBusy = JSON.parse(JSON.stringify(busyTimes));
         if (newBusy[personName]?.[dateKey]) {
           newBusy[personName][dateKey].splice(entryIndex, 1);
           if (newBusy[personName][dateKey].length === 0) delete newBusy[personName][dateKey];
+          if (Object.keys(newBusy[personName]).length === 0) delete newBusy[personName];
         }
-        setBusyTimes(newBusy);
+        db.ref("busyTimes").set(Object.keys(newBusy).length > 0 ? newBusy : null);
         setModalOpen(false);
+      };
+
+      const submitProposal = () => {
+        if (!proposalPerson || !proposalDay) return;
+        const newProposal = {
+          person: proposalPerson, date: proposalDay,
+          timeStart: proposalTimeStart, timeEnd: proposalTimeEnd,
+          notes: proposalNotes, id: Date.now(),
+        };
+        const updated = [...proposals, newProposal];
+        db.ref("proposals").set(updated);
+        setProposalNotes("");
+      };
+
+      const removeProposal = (id) => {
+        const updated = proposals.filter((p) => p.id !== id);
+        db.ref("proposals").set(updated.length > 0 ? updated : null);
       };
 
       const daysInMonth = getDaysInMonth(currentYear, currentMonth);
@@ -238,18 +287,6 @@
         else setCurrentMonth(currentMonth + 1);
       };
 
-      const submitProposal = () => {
-        if (!proposalPerson || !proposalDay) return;
-        setProposals([...proposals, {
-          person: proposalPerson, date: proposalDay,
-          timeStart: proposalTimeStart, timeEnd: proposalTimeEnd,
-          notes: proposalNotes, id: Date.now(),
-        }]);
-        setProposalNotes("");
-      };
-
-      const removeProposal = (id) => setProposals(proposals.filter((p) => p.id !== id));
-
       const selectedDateLabel = selectedDay ? `${MONTH_NAMES[currentMonth]} ${selectedDay}, ${currentYear}` : "";
 
       const upcomingHangoutEntries = Object.entries(hangoutDays).filter(([day]) => {
@@ -277,6 +314,17 @@
         background: "#fff", borderRadius: 16, border: "1px solid #e2e8f0",
         padding: 22, marginBottom: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
       };
+
+      if (loading) {
+        return (
+          <div style={{
+            fontFamily: "'DM Sans', sans-serif", background: "#f8fafc",
+            minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <p style={{ color: "#94a3b8", fontSize: 16 }}>loading...</p>
+          </div>
+        );
+      }
 
       return (
         <div style={{
