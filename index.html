@@ -230,38 +230,49 @@
 
       const getAvailableSlots = useCallback(
         (dateKey) => {
-          if (people.length === 0) return [];
-          const slots = [];
-          const busyIntervals = people.map((p) => {
+          if (people.length < 2) return [];
+          // Collect all time boundaries within the day window
+          const timePoints = new Set([DEFAULT_DAY_START, DEFAULT_DAY_END]);
+          people.forEach((p) => {
             const entries = busyTimes[p.name]?.[dateKey] || [];
-            return entries.map((e) => ({ start: parseTime(e.start), end: parseTime(e.end) }));
+            entries.forEach((e) => {
+              const s = parseTime(e.start);
+              const en = parseTime(e.end);
+              if (s > DEFAULT_DAY_START && s < DEFAULT_DAY_END) timePoints.add(s);
+              if (en > DEFAULT_DAY_START && en < DEFAULT_DAY_END) timePoints.add(en);
+            });
           });
-          let cursor = DEFAULT_DAY_START;
-          while (cursor < DEFAULT_DAY_END) {
-            let allFree = true;
-            let nextBlock = DEFAULT_DAY_END;
-            for (const intervals of busyIntervals) {
-              for (const iv of intervals) {
-                if (iv.start < DEFAULT_DAY_END && iv.end > cursor) {
-                  if (iv.start <= cursor) { allFree = false; nextBlock = Math.min(nextBlock, iv.end); }
-                  else { nextBlock = Math.min(nextBlock, iv.start); }
-                }
-              }
-            }
-            if (allFree) {
-              let freeEnd = DEFAULT_DAY_END;
-              for (const intervals of busyIntervals) {
-                for (const iv of intervals) {
-                  if (iv.start > cursor && iv.start < freeEnd) freeEnd = iv.start;
-                }
-              }
-              if (freeEnd > cursor) slots.push({ start: cursor, end: freeEnd });
-              cursor = freeEnd;
+          const sorted = [...timePoints].sort((a, b) => a - b);
+
+          // For each interval between time points, count how many people are free
+          const freeIntervals = [];
+          for (let i = 0; i < sorted.length - 1; i++) {
+            const start = sorted[i];
+            const end = sorted[i + 1];
+            const mid = (start + end) / 2;
+            let freeCount = 0;
+            people.forEach((p) => {
+              const entries = busyTimes[p.name]?.[dateKey] || [];
+              const isBusy = entries.some((e) => {
+                const s = parseTime(e.start);
+                const en = parseTime(e.end);
+                return s <= mid && en > mid;
+              });
+              if (!isBusy) freeCount++;
+            });
+            if (freeCount >= 2) freeIntervals.push({ start, end });
+          }
+
+          // Merge consecutive intervals
+          const merged = [];
+          for (const iv of freeIntervals) {
+            if (merged.length > 0 && merged[merged.length - 1].end === iv.start) {
+              merged[merged.length - 1].end = iv.end;
             } else {
-              cursor = nextBlock;
+              merged.push({ ...iv });
             }
           }
-          return slots;
+          return merged;
         },
         [people, busyTimes]
       );
@@ -458,7 +469,7 @@
                 WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
               }}>when we can hang</h2>
               <p style={{ color: "#94a3b8", fontSize: 12, margin: "0 0 18px" }}>
-                days with 3+ hours where everyone is free (8 AM – 11 PM)
+                days with 3+ hours where at least 2 people are free (8 AM – 11 PM)
               </p>
 
               {people.length === 0 ? (
