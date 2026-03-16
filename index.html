@@ -109,6 +109,7 @@
       const [proposalTimeStart, setProposalTimeStart] = useState("14:00");
       const [proposalTimeEnd, setProposalTimeEnd] = useState("17:00");
       const [proposalNotes, setProposalNotes] = useState("");
+      const [proposalSendTo, setProposalSendTo] = useState([]);
       const [proposals, setProposals] = useState([]);
 
       // Real-time Firebase listeners
@@ -208,11 +209,13 @@
         const newProposal = {
           person: proposalPerson, date: proposalDay,
           timeStart: proposalTimeStart, timeEnd: proposalTimeEnd,
-          notes: proposalNotes, id: Date.now(),
+          notes: proposalNotes, sendTo: proposalSendTo.length > 0 ? proposalSendTo : people.filter((p) => p.name !== proposalPerson).map((p) => p.name),
+          id: Date.now(),
         };
         const updated = [...proposals, newProposal];
         db.ref("proposals").set(updated);
         setProposalNotes("");
+        setProposalSendTo([]);
       };
 
       const removeProposal = (id) => {
@@ -365,12 +368,9 @@
           <div style={{ maxWidth: 860, margin: "0 auto" }}>
             {/* Header */}
             <div style={{ textAlign: "center", marginBottom: 32 }}>
-              <h1 style={{
-                fontFamily: "'Nunito', sans-serif", fontSize: 36, fontWeight: 800,
-                background: "linear-gradient(135deg, #e040fb 0%, #60a5fa 50%, #4ecdc4 100%)",
-                WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                margin: 0, letterSpacing: -0.5,
-              }}>can we kick it</h1>
+              <img src="can_we_kick_it_transp.png" alt="can we kick it?" style={{
+                height: 120, objectFit: "contain", marginBottom: 8,
+              }} />
               <p style={{ color: "#94a3b8", fontSize: 14, marginTop: 6 }}>
                 add your name, add available times, find when everyone's free
               </p>
@@ -378,7 +378,7 @@
 
             {/* My Peoples */}
             <div style={sectionStyle}>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 16px", letterSpacing: 0.3 }}>my peoples</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 16px", letterSpacing: 0.3 }}>input your name and select your color</h2>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <input value={newName} onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addPerson()}
@@ -650,7 +650,7 @@
                       <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 6 }}>who are you?</label>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {people.map((p) => (
-                          <button key={p.name} onClick={() => setProposalPerson(p.name)} style={{
+                          <button key={p.name} onClick={() => { setProposalPerson(p.name); setProposalSendTo([]); }} style={{
                             padding: "7px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
                             background: proposalPerson === p.name ? p.color + "18" : "#f8fafc",
                             border: proposalPerson === p.name ? `2px solid ${p.color}` : "2px solid #e2e8f0",
@@ -660,6 +660,31 @@
                         ))}
                       </div>
                     </div>
+
+                    {proposalPerson && (
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 6 }}>who do you want to invite?</label>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {people.filter((p) => p.name !== proposalPerson).map((p) => {
+                          const selected = proposalSendTo.includes(p.name);
+                          return (
+                            <button key={p.name} onClick={() => {
+                              setProposalSendTo(selected ? proposalSendTo.filter((n) => n !== p.name) : [...proposalSendTo, p.name]);
+                            }} style={{
+                              padding: "7px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                              background: selected ? p.color + "18" : "#f8fafc",
+                              border: selected ? `2px solid ${p.color}` : "2px solid #e2e8f0",
+                              color: selected ? p.color : "#64748b",
+                              cursor: "pointer", transition: "all 0.15s",
+                            }}>{p.name}</button>
+                          );
+                        })}
+                      </div>
+                      <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>
+                        {proposalSendTo.length === 0 ? "none selected — will send to everyone" : `sending to ${proposalSendTo.join(", ")}`}
+                      </p>
+                    </div>
+                    )}
 
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                       <div style={{ flex: "2 1 180px" }}>
@@ -729,6 +754,11 @@
                               cursor: "pointer", fontSize: 16, lineHeight: 1,
                             }}>×</button>
                             <div style={{ fontWeight: 700, fontSize: 14, color }}>{pr.person}</div>
+                            {pr.sendTo && (
+                              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                                to: {Array.isArray(pr.sendTo) ? pr.sendTo.join(", ") : pr.sendTo}
+                              </div>
+                            )}
                             <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>
                               {dayLabel} · {formatTimeDisplay(parseTime(pr.timeStart))} – {formatTimeDisplay(parseTime(pr.timeEnd))}
                             </div>
