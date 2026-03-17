@@ -962,6 +962,839 @@
       const [actTimeEnd, setActTimeEnd] = useState("14:00");
       const [actDescription, setActDescription] = useState("");
       const [actInvite, setActInvite] = useState([]);
+      const [choiceDay, setChoiceDay] = useState(null);
+
+      // Firebase listeners
+      useEffect(() => {
+        const peopleRef = db.ref("people");
+        const busyRef = db.ref("busyTimes");
+        const proposalsRef = db.ref("proposals");
+        const actRef = db.ref("activities");
+
+        peopleRef.on("value", s => { setPeople(s.val() ? Object.values(s.val()) : []); setLoading(false); });
+        busyRef.on("value", s => setBusyTimes(s.val() || {}));
+        proposalsRef.on("value", s => setProposals(s.val() ? Object.values(s.val()) : []));
+        actRef.on("value", s => setActivities(s.val() ? Object.values(s.val()) : []));
+
+        return () => { peopleRef.off(); busyRef.off(); proposalsRef.off(); actRef.off(); };
+      }, []);
+
+      const usedColors = people.map(p => p.color);
+
+      const addPerson = () => {
+        const trimmed = newName.trim();
+        if (!trimmed || people.find(p => p.name === trimmed)) return;
+        const updated = [...people, { name: trimmed, color: selectedColor }];
+        db.ref("people").set(updated);
+        setNewName("");
+        const next = COLOR_OPTIONS.find(c => !usedColors.includes(c.value) && c.value !== selectedColor);
+        if (next) setSelectedColor(next.value);
+      };
+
+      const removePerson = (name) => {
+        const updated = people.filter(p => p.name !== name);
+        db.ref("people").set(updated.length > 0 ? updated : null);
+        const nb = { ...busyTimes }; delete nb[name];
+        db.ref("busyTimes").set(Object.keys(nb).length > 0 ? nb : null);
+      };
+
+      const openAddBusy = (day, person) => {
+        setSelectedDay(day); setSelectedPerson(person);
+        setTimeStart("09:00"); setTimeEnd("17:00");
+        setEditingEntry(null); setModalOpen(true);
+      };
+
+      const openEditBusy = (personName, dateKey, entryIndex) => {
+        const entry = busyTimes[personName]?.[dateKey]?.[entryIndex];
+        if (!entry) return;
+        setSelectedDay(parseInt(dateKey.split("-")[2]));
+        setSelectedPerson(people.find(p => p.name === personName));
+        setTimeStart(entry.start); setTimeEnd(entry.end);
+        setEditingEntry({ personName, dateKey, entryIndex }); setModalOpen(true);
+      };
+
+      const saveBusy = () => {
+        if (!selectedPerson || !selectedDay) return;
+        const dateKey = formatDate(currentYear, currentMonth, selectedDay);
+        const nb = JSON.parse(JSON.stringify(busyTimes));
+        if (editingEntry) {
+          const { personName, dateKey: dk, entryIndex } = editingEntry;
+          if (nb[personName]?.[dk]) nb[personName][dk][entryIndex] = { start: timeStart, end: timeEnd };
+        } else {
+          if (!nb[selectedPerson.name]) nb[selectedPerson.name] = {};
+          if (!nb[selectedPerson.name][dateKey]) nb[selectedPerson.name][dateKey] = [];
+          nb[selectedPerson.name][dateKey].push({ start: timeStart, end: timeEnd });
+        }
+        db.ref("busyTimes").set(nb); setModalOpen(false);
+      };
+
+      const deleteBusyEntry = () => {
+        if (!editingEntry) return;
+        const { personName, dateKey, entryIndex } = editingEntry;
+        const nb = JSON.parse(JSON.stringify(busyTimes));
+        if (nb[personName]?.[dateKey]) {
+          nb[personName][dateKey].splice(entryIndex, 1);
+          if (nb[personName][dateKey].length === 0) delete nb[personName][dateKey];
+          if (Object.keys(nb[personName]).length === 0) delete nb[personName];
+        }
+        db.ref("busyTimes").set(Object.keys(nb).length > 0 ? nb : null); setModalOpen(false);
+      };
+
+      // Activity functions
+      const openAddActivity = (day) => {
+        setActDay(day); setActPerson(""); setActTimeStart("10:00"); setActTimeEnd("14:00");
+        setActDescription(""); setActInvite([]); setActModalOpen(true);
+      };
+
+      const saveActivity = () => {
+        if (!actPerson || !actDay || !actDescription.trim()) return;
+        const dateKey = formatDate(currentYear, currentMonth, actDay);
+        const newAct = {
+          person: actPerson, date: dateKey, timeStart: actTimeStart, timeEnd: actTimeEnd,
+          description: actDescription.trim(),
+          invite: actInvite.length > 0 ? actInvite : people.filter(p => p.name !== actPerson).map(p => p.name),
+          id: Date.now(),
+        };
+        const updated = [...activities, newAct];
+        db.ref("activities").set(updated); setActModalOpen(false);
+      };
+
+      const removeActivity = (id) => {
+        const updated = activities.filter(a => a.id !== id);
+        db.ref("activities").set(updated.length > 0 ? updated : null);
+      };
+
+      const submitProposal = () => {
+        if (!proposalPerson || !proposalDay) return;
+        const np = {
+          person: proposalPerson, date: proposalDay,
+          timeStart: proposalTimeStart, timeEnd: proposalTimeEnd,
+          notes: proposalNotes,
+          sendTo: proposalSendTo.length > 0 ? proposalSendTo : people.filter(p => p.name !== proposalPerson).map(p => p.name),
+          id: Date.now(),
+        };
+        db.ref("proposals").set([...proposals, np]);
+        setProposalNotes(""); setProposalSendTo([]);
+      };
+
+      const removeProposal = (id) => {
+        const updated = proposals.filter(p => p.id !== id);
+        db.ref("proposals").set(updated.length > 0 ? updated : null);
+      };
+
+      const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+      const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
+      const calendarDays = useMemo(() => {
+        const days = [];
+        for (let i = 0; i < firstDay; i++) days.push(null);
+        for (let d = 1; d <= daysInMonth; d++) days.push(d);
+        return days;
+      }, [firstDay, daysInMonth]);
+
+      const getAvailableSlots = useCallback(
+        (dateKey) => {
+          if (people.length < 2 || !myName) return [];
+          const targetPeople = hangWith.length > 0
+            ? people.filter(p => hangWith.includes(p.name))
+            : people.filter(p => p.name !== myName);
+          if (targetPeople.length === 0) return [];
+          const myEntries = busyTimes[myName]?.[dateKey] || [];
+          if (myEntries.length === 0) return [];
+          const twE = targetPeople.filter(p => (busyTimes[p.name]?.[dateKey] || []).length > 0);
+          if (twE.length === 0) return [];
+
+          const tp = new Set([DEFAULT_DAY_START, DEFAULT_DAY_END]);
+          [myName, ...twE.map(p => p.name)].forEach(name => {
+            (busyTimes[name]?.[dateKey] || []).forEach(e => {
+              const s = parseTime(e.start), en = parseTime(e.end);
+              if (s > DEFAULT_DAY_START && s < DEFAULT_DAY_END) tp.add(s);
+              if (en > DEFAULT_DAY_START && en < DEFAULT_DAY_END) tp.add(en);
+            });
+          });
+          const sorted = [...tp].sort((a,b) => a - b);
+          const isAvail = (name, mid) => (busyTimes[name]?.[dateKey] || []).some(e => {
+            const s = parseTime(e.start), en = parseTime(e.end);
+            return s <= mid && en > mid;
+          });
+
+          const fi = [];
+          for (let i = 0; i < sorted.length - 1; i++) {
+            const start = sorted[i], end = sorted[i+1], mid = (start+end)/2;
+            if (!isAvail(myName, mid)) continue;
+            if (twE.some(p => isAvail(p.name, mid))) fi.push({ start, end });
+          }
+          const merged = [];
+          for (const iv of fi) {
+            if (merged.length > 0 && merged[merged.length-1].end === iv.start) merged[merged.length-1].end = iv.end;
+            else merged.push({ ...iv });
+          }
+          return merged;
+        }, [people, busyTimes, myName, hangWith]
+      );
+
+      const hangoutDays = useMemo(() => {
+        if (people.length === 0) return {};
+        const result = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateKey = formatDate(currentYear, currentMonth, d);
+          const slots = getAvailableSlots(dateKey);
+          const totalHours = slots.reduce((sum, s) => sum + (s.end - s.start), 0);
+          if (totalHours >= 3) result[d] = slots;
+        }
+        return result;
+      }, [people, busyTimes, currentMonth, currentYear, daysInMonth, getAvailableSlots, myName, hangWith]);
+
+      const prevMonth = () => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(currentYear-1); } else setCurrentMonth(currentMonth-1); };
+      const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(currentYear+1); } else setCurrentMonth(currentMonth+1); };
+
+      const selectedDateLabel = selectedDay ? `${MONTH_NAMES[currentMonth]} ${selectedDay}, ${currentYear}` : "";
+      const actDateLabel = actDay ? `${MONTH_NAMES[currentMonth]} ${actDay}, ${currentYear}` : "";
+
+      const upcomingHangoutEntries = Object.entries(hangoutDays).filter(([day]) => {
+        const d = new Date(currentYear, currentMonth, parseInt(day));
+        const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        return d >= t;
+      });
+
+      const hangoutDayOptions = Object.keys(hangoutDays).map(d => {
+        const dateObj = new Date(currentYear, currentMonth, parseInt(d));
+        const dayName = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+        return { value: formatDate(currentYear, currentMonth, parseInt(d)), label: `${dayName}, ${MONTH_NAMES[currentMonth]} ${d}` };
+      });
+
+      // Helper: does a day have activities?
+      const getActivitiesForDay = (day) => {
+        const dateKey = formatDate(currentYear, currentMonth, day);
+        return activities.filter(a => a.date === dateKey);
+      };
+
+      const inputStyle = { background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",color:"#1e293b",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box" };
+      const btnPrimary = { background:"#e040fb",color:"#fff",border:"none",borderRadius:10,padding:"10px 22px",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:0.3 };
+      const sectionStyle = { background:"#fff",borderRadius:16,border:"1px solid #e2e8f0",padding:22,marginBottom:24,boxShadow:"0 1px 3px rgba(0,0,0,0.04)" };
+
+      if (loading) {
+        return (
+          <div style={{ fontFamily:"'DM Sans',sans-serif",background:"#f8fafc",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center" }}>
+            <p style={{ color:"#94a3b8",fontSize:16 }}>loading...</p>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ fontFamily:"'DM Sans','Nunito',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#1e293b",padding:"24px 16px" }}>
+          <div style={{ maxWidth:860,margin:"0 auto" }}>
+            {/* Header */}
+            <div style={{ textAlign:"center",marginBottom:32 }}>
+              <img src="can_we_kick_it_transp.png" alt="can we kick it?" style={{ height:120,objectFit:"contain",marginBottom:8 }} />
+              <p style={{ color:"#94a3b8",fontSize:14,marginTop:6 }}>add your name, add available times, find when everyone's free</p>
+            </div>
+
+            {/* Add People */}
+            <div style={sectionStyle}>
+              <h2 style={{ fontSize:16,fontWeight:700,margin:"0 0 16px",letterSpacing:0.3,color:"#e040fb" }}>input your name and select your color</h2>
+              <div style={{ display:"flex",gap:10,flexWrap:"wrap",alignItems:"center" }}>
+                <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addPerson()}
+                  placeholder="name..." style={{ ...inputStyle,width:160,flex:"none" }} />
+                <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                  {COLOR_OPTIONS.map(c => (
+                    <button key={c.value} title={c.name} onClick={()=>setSelectedColor(c.value)} disabled={usedColors.includes(c.value)}
+                      style={{ width:28,height:28,borderRadius:"50%",border:selectedColor===c.value?"2.5px solid #1e293b":"2px solid transparent",
+                        background:c.value,cursor:usedColors.includes(c.value)?"not-allowed":"pointer",
+                        opacity:usedColors.includes(c.value)?0.25:1,transition:"all 0.15s" }} />
+                  ))}
+                </div>
+                <button onClick={addPerson} style={btnPrimary}>+ add</button>
+              </div>
+              {people.length > 0 && (
+                <div style={{ display:"flex",gap:10,marginTop:16,flexWrap:"wrap" }}>
+                  {people.map(p => (
+                    <div key={p.name} style={{ display:"flex",alignItems:"center",gap:8,background:"#f8fafc",borderRadius:20,padding:"6px 14px",border:`2px solid ${p.color}` }}>
+                      <div style={{ width:10,height:10,borderRadius:"50%",background:p.color }} />
+                      <span style={{ fontSize:14,fontWeight:600 }}>{p.name}</span>
+                      <button onClick={()=>removePerson(p.name)} style={{ background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,padding:0,lineHeight:1 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Month Nav */}
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16 }}>
+              <button onClick={prevMonth} style={{ background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18 }}>‹</button>
+              <h2 style={{ fontSize:20,fontWeight:700,margin:0 }}>{MONTH_NAMES[currentMonth]} {currentYear}</h2>
+              <button onClick={nextMonth} style={{ background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18 }}>›</button>
+            </div>
+
+            {/* Main Calendar */}
+            <div style={{ ...sectionStyle,padding:16 }}>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2 }}>
+                {DAYS_OF_WEEK.map(d => (
+                  <div key={d} style={{ textAlign:"center",fontSize:11,fontWeight:700,color:"#94a3b8",padding:"8px 0",textTransform:"uppercase",letterSpacing:1 }}>{d}</div>
+                ))}
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3 }}>
+                {calendarDays.map((day, i) => {
+                  if (day === null) return <div key={`empty-${i}`} />;
+                  const isToday = day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+                  const dayActs = getActivitiesForDay(day);
+                  const hasActivity = dayActs.length > 0;
+                  return (
+                    <div key={day}
+                      onClick={() => { if (people.length > 0) setChoiceDay(day); }}
+                      style={{
+                        minHeight:72,borderRadius:10,padding:"6px 8px",
+                        background: isToday ? "rgba(224,64,251,0.06)" : "#fff",
+                        border: hasActivity ? "2px solid #22c55e" : isToday ? "1.5px solid rgba(224,64,251,0.35)" : "1px solid #f1f5f9",
+                        cursor: people.length>0?"pointer":"default",transition:"background 0.15s",
+                      }}
+                      onMouseEnter={e=>{if(people.length>0)e.currentTarget.style.background="#f1f5f9"}}
+                      onMouseLeave={e=>{e.currentTarget.style.background=isToday?"rgba(224,64,251,0.06)":"#fff"}}
+                    >
+                      <div style={{ fontSize:13,fontWeight:isToday?700:500,color:isToday?"#e040fb":"#475569" }}>{day}</div>
+                      <div style={{ display:"flex",flexDirection:"column",gap:2,marginTop:3 }}>
+                        {people.map(p => {
+                          const dateKey = formatDate(currentYear, currentMonth, day);
+                          const entries = busyTimes[p.name]?.[dateKey] || [];
+                          return entries.map((entry, idx) => (
+                            <div key={`${p.name}-${idx}`}
+                              onClick={e=>{e.stopPropagation();openEditBusy(p.name,dateKey,idx)}}
+                              title={`${p.name}: ${entry.start}–${entry.end} (click to edit)`}
+                              style={{ fontSize:9,background:p.color+"20",color:p.color,borderRadius:4,padding:"2px 4px",fontWeight:600,
+                                borderLeft:`3px solid ${p.color}`,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
+                              {p.name.slice(0,6)} {entry.start}
+                            </div>
+                          ));
+                        })}
+                        {dayActs.map(a => {
+                          const person = people.find(p => p.name === a.person);
+                          const c = person?.color || "#22c55e";
+                          return (
+                            <div key={a.id} title={`${a.person}: ${a.description}`}
+                              style={{ fontSize:9,background:"#22c55e20",color:"#16a34a",borderRadius:4,padding:"2px 4px",fontWeight:600,
+                                borderLeft:"3px solid #22c55e",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
+                              ★ {a.description.slice(0,12)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Activities Section */}
+            {activities.length > 0 && (
+              <div style={sectionStyle}>
+                <h2 style={{ fontSize:18,fontWeight:800,margin:"0 0 14px",fontFamily:"'Nunito',sans-serif",color:"#22c55e" }}>
+                  what's happening
+                </h2>
+                {activities.filter(a => {
+                  const [y,m,d] = a.date.split("-").map(Number);
+                  return new Date(y,m-1,d) >= new Date(today.getFullYear(),today.getMonth(),today.getDate());
+                }).map(a => {
+                  const person = people.find(p => p.name === a.person);
+                  const c = person?.color || "#22c55e";
+                  const [y,m,d] = a.date.split("-").map(Number);
+                  const dateObj = new Date(y,m-1,d);
+                  const dayLabel = dateObj.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+                  return (
+                    <div key={a.id} style={{ padding:"14px 16px",marginBottom:8,background:"#22c55e08",borderRadius:12,borderLeft:"4px solid #22c55e",position:"relative" }}>
+                      <button onClick={()=>removeActivity(a.id)} style={{ position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1 }}>×</button>
+                      <div style={{ fontWeight:700,fontSize:14,color:c }}>{a.person}</div>
+                      <div style={{ fontSize:13,color:"#475569",marginTop:2 }}>
+                        {dayLabel} · {formatTimeDisplay(parseTime(a.timeStart))} – {formatTimeDisplay(parseTime(a.timeEnd))}
+                      </div>
+                      <div style={{ fontSize:13,color:"#1e293b",marginTop:4,fontWeight:600 }}>★ {a.description}</div>
+                      {a.invite && (
+                        <div style={{ fontSize:12,color:"#94a3b8",marginTop:4 }}>
+                          invited: {Array.isArray(a.invite) ? a.invite.join(", ") : a.invite}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* When We Can Hang */}
+            <div style={sectionStyle}>
+              <h2 style={{ fontSize:20,fontWeight:800,margin:"0 0 6px",fontFamily:"'Nunito',sans-serif",
+                background:"linear-gradient(135deg, #f59e0b, #22c55e)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent" }}>when we can hang</h2>
+              <p style={{ color:"#94a3b8",fontSize:12,margin:"0 0 18px" }}>
+                select yourself to see days you overlap with at least 1 other person (3+ hrs, 8 AM – 11 PM)
+              </p>
+
+              {people.length === 0 ? (
+                <p style={{ color:"#94a3b8",fontSize:14,fontStyle:"italic" }}>add some friends above to get started</p>
+              ) : (
+                <>
+                  <div style={{ marginBottom:18 }}>
+                    <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who are you?</label>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      {people.map(p => (
+                        <button key={p.name} onClick={()=>{setMyName(p.name);setHangWith([])}} style={{
+                          padding:"7px 16px",borderRadius:8,fontSize:13,fontWeight:600,
+                          background:myName===p.name?p.color+"18":"#f8fafc",
+                          border:myName===p.name?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                          color:myName===p.name?p.color:"#64748b",cursor:"pointer",transition:"all 0.15s",
+                        }}>{p.name}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {!myName ? (
+                    <p style={{ color:"#94a3b8",fontSize:14,fontStyle:"italic" }}>select your name above to see overlapping availability</p>
+                  ) : (
+                  <>
+                  <div style={{ marginBottom:18 }}>
+                    <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who do you want to hang with?</label>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",alignItems:"center" }}>
+                      {people.filter(p=>p.name!==myName).map(p => {
+                        const sel = hangWith.includes(p.name);
+                        return (
+                          <button key={p.name} onClick={()=>setHangWith(sel?hangWith.filter(n=>n!==p.name):[...hangWith,p.name])} style={{
+                            padding:"7px 16px",borderRadius:8,fontSize:13,fontWeight:600,
+                            background:sel?p.color+"18":"#f8fafc",border:sel?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                            color:sel?p.color:"#64748b",cursor:"pointer",transition:"all 0.15s",
+                          }}>{p.name}</button>
+                        );
+                      })}
+                      {hangWith.length>0 && (
+                        <button onClick={()=>setHangWith([])} style={{ padding:"7px 12px",borderRadius:8,fontSize:11,fontWeight:600,background:"transparent",border:"1px solid #e2e8f0",color:"#94a3b8",cursor:"pointer" }}>clear</button>
+                      )}
+                    </div>
+                    <p style={{ fontSize:11,color:"#94a3b8",marginTop:6 }}>
+                      {hangWith.length===0?"none selected — showing overlap with anyone":`showing overlap with ${hangWith.join(", ")}`}
+                    </p>
+                  </div>
+
+                  {/* Mini calendar */}
+                  <div style={{ marginBottom:20 }}>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2 }}>
+                      {DAYS_OF_WEEK.map(d => (
+                        <div key={d} style={{ textAlign:"center",fontSize:10,fontWeight:700,color:"#94a3b8",padding:"6px 0",textTransform:"uppercase",letterSpacing:1 }}>{d}</div>
+                      ))}
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3 }}>
+                      {calendarDays.map((day,i) => {
+                        if (day===null) return <div key={`h-empty-${i}`} />;
+                        const isHangout = hangoutDays[day] != null;
+                        return (
+                          <div key={day} style={{
+                            height:40,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",
+                            fontSize:13,fontWeight:isHangout?700:400,
+                            background:isHangout?"linear-gradient(135deg, #e040fb, #f472b6)":"#fff",
+                            color:isHangout?"#fff":"#cbd5e1",
+                            border:isHangout?"none":"1.5px solid #e040fb30",
+                            boxShadow:isHangout?"0 4px 15px rgba(224,64,251,0.25)":"none",
+                            transition:"all 0.2s",
+                          }}>{day}</div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Collapsible list */}
+                  <button onClick={()=>setAvailListOpen(!availListOpen)} style={{
+                    display:"flex",alignItems:"center",gap:8,width:"100%",
+                    background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,
+                    padding:"10px 16px",cursor:"pointer",marginBottom:availListOpen?10:0,
+                    fontSize:14,fontWeight:600,color:"#475569",transition:"all 0.2s",
+                  }}>
+                    <span style={{ display:"inline-block",transition:"transform 0.2s",transform:availListOpen?"rotate(90deg)":"rotate(0deg)",fontSize:12 }}>▶</span>
+                    available days & times
+                    <span style={{ marginLeft:"auto",fontSize:12,fontWeight:400,color:"#94a3b8" }}>
+                      {upcomingHangoutEntries.length} day{upcomingHangoutEntries.length!==1?"s":""}
+                    </span>
+                  </button>
+
+                  {availListOpen && (
+                    upcomingHangoutEntries.length === 0 ? (
+                      <p style={{ color:"#94a3b8",fontSize:14,fontStyle:"italic",padding:"4px 0" }}>no upcoming days with 3+ hours of shared availability this month</p>
+                    ) : (
+                      <ul style={{ listStyle:"none",padding:0,margin:0 }}>
+                        {upcomingHangoutEntries.map(([day, slots]) => {
+                          const dateObj = new Date(currentYear, currentMonth, parseInt(day));
+                          const dayName = dateObj.toLocaleDateString("en-US",{weekday:"long"});
+                          const totalHrs = slots.reduce((s,sl) => s + (sl.end - sl.start), 0);
+                          return (
+                            <li key={day} style={{ padding:"12px 16px",marginBottom:6,background:"rgba(224,64,251,0.04)",borderRadius:10,borderLeft:"4px solid #e040fb" }}>
+                              <div style={{ fontWeight:700,fontSize:14,marginBottom:4,color:"#1e293b" }}>
+                                {dayName}, {MONTH_NAMES[currentMonth]} {day}
+                                <span style={{ fontWeight:400,color:"#a78bfa",marginLeft:8,fontSize:12 }}>{totalHrs.toFixed(1)} hrs free</span>
+                              </div>
+                              {slots.map((s,idx) => (
+                                <div key={idx} style={{ fontSize:13,color:"#64748b",marginLeft:4 }}>• {formatTimeDisplay(s.start)} – {formatTimeDisplay(s.end)}</div>
+                              ))}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )
+                  )}
+                  </>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Hangout Proposal */}
+            <div style={sectionStyle}>
+              <h2 style={{ fontSize:20,fontWeight:800,margin:"0 0 6px",fontFamily:"'Nunito',sans-serif",
+                background:"linear-gradient(135deg, #60a5fa, #4ecdc4)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent" }}>hangout proposal</h2>
+              <p style={{ color:"#94a3b8",fontSize:12,margin:"0 0 18px" }}>suggest a day, time, and what you want to do</p>
+
+              {people.length === 0 ? (
+                <p style={{ color:"#94a3b8",fontSize:14,fontStyle:"italic" }}>add some friends first to make a proposal</p>
+              ) : (
+                <>
+                  <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+                    <div>
+                      <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who are you?</label>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        {people.map(p => (
+                          <button key={p.name} onClick={()=>{setProposalPerson(p.name);setProposalSendTo([])}} style={{
+                            padding:"7px 16px",borderRadius:8,fontSize:13,fontWeight:600,
+                            background:proposalPerson===p.name?p.color+"18":"#f8fafc",
+                            border:proposalPerson===p.name?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                            color:proposalPerson===p.name?p.color:"#64748b",cursor:"pointer",transition:"all 0.15s",
+                          }}>{p.name}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {proposalPerson && (
+                    <div>
+                      <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who do you want to invite?</label>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        {people.filter(p=>p.name!==proposalPerson).map(p => {
+                          const sel = proposalSendTo.includes(p.name);
+                          return (
+                            <button key={p.name} onClick={()=>setProposalSendTo(sel?proposalSendTo.filter(n=>n!==p.name):[...proposalSendTo,p.name])} style={{
+                              padding:"7px 16px",borderRadius:8,fontSize:13,fontWeight:600,
+                              background:sel?p.color+"18":"#f8fafc",border:sel?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                              color:sel?p.color:"#64748b",cursor:"pointer",transition:"all 0.15s",
+                            }}>{p.name}</button>
+                          );
+                        })}
+                      </div>
+                      <p style={{ fontSize:11,color:"#94a3b8",marginTop:6 }}>
+                        {proposalSendTo.length===0?"none selected — will send to everyone":`sending to ${proposalSendTo.join(", ")}`}
+                      </p>
+                    </div>
+                    )}
+
+                    <div style={{ display:"flex",gap:12,flexWrap:"wrap" }}>
+                      <div style={{ flex:"2 1 180px" }}>
+                        <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>pick a day</label>
+                        <select value={proposalDay} onChange={e=>setProposalDay(e.target.value)} style={{ ...inputStyle,cursor:"pointer" }}>
+                          <option value="">select a day...</option>
+                          {hangoutDayOptions.length>0 && (
+                            <optgroup label="Available hangout days">
+                              {hangoutDayOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </optgroup>
+                          )}
+                          <optgroup label={hangoutDayOptions.length>0?"All days this month":`${MONTH_NAMES[currentMonth]} ${currentYear}`}>
+                            {Array.from({length:daysInMonth},(_,i) => {
+                              const d=i+1, dk=formatDate(currentYear,currentMonth,d);
+                              const dn=new Date(currentYear,currentMonth,d).toLocaleDateString("en-US",{weekday:"short"});
+                              return <option key={dk} value={dk}>{dn}, {MONTH_NAMES[currentMonth]} {d}</option>;
+                            })}
+                          </optgroup>
+                        </select>
+                      </div>
+                      <div style={{ flex:"1 1 100px" }}>
+                        <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>from</label>
+                        <input type="time" value={proposalTimeStart} onChange={e=>setProposalTimeStart(e.target.value)} style={inputStyle} />
+                      </div>
+                      <div style={{ flex:"1 1 100px" }}>
+                        <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>to</label>
+                        <input type="time" value={proposalTimeEnd} onChange={e=>setProposalTimeEnd(e.target.value)} style={inputStyle} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>notes</label>
+                      <textarea value={proposalNotes} onChange={e=>setProposalNotes(e.target.value)}
+                        placeholder="dinner at that new taco spot? movie night? park hangs?"
+                        rows={3} style={{ ...inputStyle,resize:"vertical",fontFamily:"inherit" }} />
+                    </div>
+
+                    <button onClick={submitProposal} disabled={!proposalPerson||!proposalDay}
+                      style={{ ...btnPrimary,alignSelf:"flex-start",
+                        background:(!proposalPerson||!proposalDay)?"#cbd5e1":"linear-gradient(135deg, #60a5fa, #4ecdc4)",
+                        cursor:(!proposalPerson||!proposalDay)?"not-allowed":"pointer" }}>submit proposal</button>
+                  </div>
+
+                  {proposals.length > 0 && (
+                    <div style={{ marginTop:20 }}>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:0.5 }}>proposals</div>
+                      {proposals.map(pr => {
+                        const person = people.find(p => p.name === pr.person);
+                        const color = person?.color || "#60a5fa";
+                        const [y,m,d] = pr.date.split("-").map(Number);
+                        const dayLabel = new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+                        return (
+                          <div key={pr.id} style={{ padding:"14px 16px",marginBottom:8,background:color+"08",borderRadius:12,borderLeft:`4px solid ${color}`,position:"relative" }}>
+                            <button onClick={()=>removeProposal(pr.id)} style={{ position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1 }}>×</button>
+                            <div style={{ fontWeight:700,fontSize:14,color }}>{pr.person}</div>
+                            {pr.sendTo && <div style={{ fontSize:12,color:"#94a3b8",marginTop:2 }}>to: {Array.isArray(pr.sendTo)?pr.sendTo.join(", "):pr.sendTo}</div>}
+                            <div style={{ fontSize:13,color:"#475569",marginTop:2 }}>{dayLabel} · {formatTimeDisplay(parseTime(pr.timeStart))} – {formatTimeDisplay(parseTime(pr.timeEnd))}</div>
+                            {pr.notes && <div style={{ fontSize:13,color:"#64748b",marginTop:6,background:"rgba(0,0,0,0.02)",borderRadius:8,padding:"8px 12px",fontStyle:"italic" }}>"{pr.notes}"</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ textAlign:"center",padding:"16px 0",color:"#94a3b8",fontSize:12 }}>
+              click a day to add available times or activities · click an entry to edit or delete it
+            </div>
+          </div>
+
+          {/* Available Time Modal */}
+          <Modal isOpen={modalOpen} onClose={()=>setModalOpen(false)}>
+            <h3 style={{ margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#1e293b" }}>{editingEntry?"edit available time":"add available time"}</h3>
+            <p style={{ color:"#64748b",fontSize:14,margin:"0 0 20px" }}>{selectedDateLabel}</p>
+
+            {!editingEntry && (
+              <div style={{ marginBottom:16 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>...and you might be?</label>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {people.map(p => (
+                    <button key={p.name} onClick={()=>setSelectedPerson(p)} style={{
+                      padding:"6px 14px",borderRadius:8,fontSize:13,fontWeight:600,
+                      background:selectedPerson?.name===p.name?p.color+"18":"#f8fafc",
+                      border:selectedPerson?.name===p.name?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                      color:selectedPerson?.name===p.name?p.color:"#64748b",cursor:"pointer",
+                    }}>{p.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {editingEntry && (
+              <div style={{ marginBottom:16,display:"flex",alignItems:"center",gap:8 }}>
+                <div style={{ width:10,height:10,borderRadius:"50%",background:people.find(p=>p.name===editingEntry.personName)?.color }} />
+                <span style={{ fontSize:14,fontWeight:600,color:"#1e293b" }}>{editingEntry.personName}</span>
+              </div>
+            )}
+            <div style={{ display:"flex",gap:12,marginBottom:20 }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>from</label>
+                <input type="time" value={timeStart} onChange={e=>setTimeStart(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>to</label>
+                <input type="time" value={timeEnd} onChange={e=>setTimeEnd(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              {editingEntry && (
+                <button onClick={deleteBusyEntry} style={{ background:"#fef2f2",color:"#ef4444",border:"1px solid #fecaca",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer",fontWeight:600,marginRight:"auto" }}>delete</button>
+              )}
+              <button onClick={()=>setModalOpen(false)} style={{ background:"#f8fafc",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer" }}>cancel</button>
+              <button onClick={saveBusy} style={btnPrimary}>{editingEntry?"save":"add"}</button>
+            </div>
+          </Modal>
+
+          {/* Day Choice Modal */}
+          <Modal isOpen={choiceDay !== null} onClose={()=>setChoiceDay(null)}>
+            <h3 style={{ margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#1e293b" }}>
+              {choiceDay ? `${MONTH_NAMES[currentMonth]} ${choiceDay}, ${currentYear}` : ""}
+            </h3>
+            <p style={{ color:"#64748b",fontSize:14,margin:"0 0 20px" }}>what would you like to do?</p>
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <button onClick={()=>{ const d = choiceDay; setChoiceDay(null); openAddBusy(d, people[0]); }}
+                style={{ padding:"14px 20px",borderRadius:12,fontSize:15,fontWeight:600,cursor:"pointer",
+                  background:"#e040fb",color:"#fff",border:"none",textAlign:"left" }}>
+                add available time
+              </button>
+              <button onClick={()=>{ const d = choiceDay; setChoiceDay(null); openAddActivity(d); }}
+                style={{ padding:"14px 20px",borderRadius:12,fontSize:15,fontWeight:600,cursor:"pointer",
+                  background:"#22c55e",color:"#fff",border:"none",textAlign:"left" }}>
+                add my activity
+              </button>
+            </div>
+          </Modal>
+
+          {/* Activity Modal */}
+          <Modal isOpen={actModalOpen} onClose={()=>setActModalOpen(false)}>
+            <h3 style={{ margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#22c55e" }}>★ add an activity</h3>
+            <p style={{ color:"#64748b",fontSize:14,margin:"0 0 20px" }}>{actDateLabel}</p>
+
+            <div style={{ marginBottom:16 }}>
+              <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who are you?</label>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {people.map(p => (
+                  <button key={p.name} onClick={()=>{setActPerson(p.name);setActInvite([])}} style={{
+                    padding:"6px 14px",borderRadius:8,fontSize:13,fontWeight:600,
+                    background:actPerson===p.name?p.color+"18":"#f8fafc",
+                    border:actPerson===p.name?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                    color:actPerson===p.name?p.color:"#64748b",cursor:"pointer",
+                  }}>{p.name}</button>
+                ))}
+              </div>
+            </div>
+
+            {actPerson && (
+              <div style={{ marginBottom:16 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>who would enjoy joining?</label>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {people.filter(p=>p.name!==actPerson).map(p => {
+                    const sel = actInvite.includes(p.name);
+                    return (
+                      <button key={p.name} onClick={()=>setActInvite(sel?actInvite.filter(n=>n!==p.name):[...actInvite,p.name])} style={{
+                        padding:"6px 14px",borderRadius:8,fontSize:13,fontWeight:600,
+                        background:sel?p.color+"18":"#f8fafc",border:sel?`2px solid ${p.color}`:"2px solid #e2e8f0",
+                        color:sel?p.color:"#64748b",cursor:"pointer",
+                      }}>{p.name}</button>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize:11,color:"#94a3b8",marginTop:6 }}>
+                  {actInvite.length===0?"none selected — will invite everyone":`inviting ${actInvite.join(", ")}`}
+                </p>
+              </div>
+            )}
+
+            <div style={{ display:"flex",gap:12,marginBottom:16 }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>from</label>
+                <input type="time" value={actTimeStart} onChange={e=>setActTimeStart(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>to</label>
+                <input type="time" value={actTimeEnd} onChange={e=>setActTimeEnd(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom:20 }}>
+              <label style={{ fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6 }}>what are you doing?</label>
+              <input value={actDescription} onChange={e=>setActDescription(e.target.value)}
+                placeholder="farmer's market, hiking, brunch..."
+                style={inputStyle} />
+            </div>
+
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <button onClick={()=>setActModalOpen(false)} style={{ background:"#f8fafc",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer" }}>cancel</button>
+              <button onClick={saveActivity} disabled={!actPerson||!actDescription.trim()}
+                style={{ ...btnPrimary,background:(!actPerson||!actDescription.trim())?"#cbd5e1":"#22c55e",
+                  cursor:(!actPerson||!actDescription.trim())?"not-allowed":"pointer" }}>add activity</button>
+            </div>
+          </Modal>
+        </div>
+      );
+    }
+
+    /* ---- APP WRAPPER WITH LANDING PAGE ---- */
+    function App() {
+      const [page, setPage] = useState("landing");
+      if (page === "landing") return <LandingPage onEnter={() => setPage("app")} />;
+      return <MainApp />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>    const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const COLOR_OPTIONS = [
+      { name: "Coral", value: "#FF6B6B" },
+      { name: "Ocean", value: "#4ECDC4" },
+      { name: "Sunflower", value: "#FFE66D" },
+      { name: "Lavender", value: "#A78BFA" },
+      { name: "Mint", value: "#6BCB77" },
+      { name: "Sky", value: "#60A5FA" },
+      { name: "Peach", value: "#FDBA74" },
+      { name: "Rose", value: "#F9A8D4" },
+      { name: "Lime", value: "#BEF264" },
+      { name: "Teal", value: "#2DD4BF" },
+    ];
+    const DEFAULT_DAY_START = 8;
+    const DEFAULT_DAY_END = 23;
+
+    function getDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+    function getFirstDayOfMonth(y, m) { return new Date(y, m, 1).getDay(); }
+    function formatDate(y, m, d) { return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+    function parseTime(s) { const [h,m] = s.split(":").map(Number); return h + m/60; }
+    function formatTimeDisplay(hrs) {
+      const h = Math.floor(hrs), m = Math.round((hrs-h)*60);
+      const ap = h >= 12 ? "PM" : "AM", h12 = h===0?12:h>12?h-12:h;
+      return `${h12}:${String(m).padStart(2,"0")} ${ap}`;
+    }
+
+    function Modal({ isOpen, onClose, children }) {
+      if (!isOpen) return null;
+      return (
+        <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:28,minWidth:340,maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,0.15)" }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    /* ---- LANDING PAGE ---- */
+    function LandingPage({ onEnter }) {
+      return (
+        <div onClick={onEnter} style={{
+          minHeight: "100vh", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", background: "#0a0a0a",
+          cursor: "pointer", userSelect: "none",
+        }}>
+          <img src="can_we_kick_it_transp.png" alt="can we kick it?" style={{
+            maxWidth: "80vw", maxHeight: "60vh", objectFit: "contain",
+          }} />
+          <p style={{
+            color: "#475569", fontSize: 14, marginTop: 24,
+            fontFamily: "'DM Sans', sans-serif", letterSpacing: 1,
+            animation: "pulse 2s ease-in-out infinite",
+          }}>tap to enter</p>
+          <style>{`@keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }`}</style>
+        </div>
+      );
+    }
+
+    /* ---- MAIN APP ---- */
+    function MainApp() {
+      const today = new Date();
+      const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+      const [currentYear, setCurrentYear] = useState(today.getFullYear());
+      const [people, setPeople] = useState([]);
+      const [newName, setNewName] = useState("");
+      const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0].value);
+      const [busyTimes, setBusyTimes] = useState({});
+      const [modalOpen, setModalOpen] = useState(false);
+      const [selectedDay, setSelectedDay] = useState(null);
+      const [selectedPerson, setSelectedPerson] = useState(null);
+      const [timeStart, setTimeStart] = useState("09:00");
+      const [timeEnd, setTimeEnd] = useState("17:00");
+      const [editingEntry, setEditingEntry] = useState(null);
+      const [availListOpen, setAvailListOpen] = useState(true);
+      const [loading, setLoading] = useState(true);
+      const [myName, setMyName] = useState("");
+      const [hangWith, setHangWith] = useState([]);
+
+      const [proposalPerson, setProposalPerson] = useState("");
+      const [proposalDay, setProposalDay] = useState("");
+      const [proposalTimeStart, setProposalTimeStart] = useState("14:00");
+      const [proposalTimeEnd, setProposalTimeEnd] = useState("17:00");
+      const [proposalNotes, setProposalNotes] = useState("");
+      const [proposalSendTo, setProposalSendTo] = useState([]);
+      const [proposals, setProposals] = useState([]);
+
+      // Activity highlight state
+      const [activities, setActivities] = useState([]);
+      const [actModalOpen, setActModalOpen] = useState(false);
+      const [actDay, setActDay] = useState(null);
+      const [actPerson, setActPerson] = useState("");
+      const [actTimeStart, setActTimeStart] = useState("10:00");
+      const [actTimeEnd, setActTimeEnd] = useState("14:00");
+      const [actDescription, setActDescription] = useState("");
+      const [actInvite, setActInvite] = useState([]);
 
       // Firebase listeners
       useEffect(() => {
