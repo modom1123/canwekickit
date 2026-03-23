@@ -36,13 +36,18 @@ const pT=s=>{const[h,m]=s.split(":").map(Number);return h+m/60};
 const fTD=h=>{const hr=Math.floor(h),mn=Math.round((h-hr)*60),ap=hr>=12?"PM":"AM",h12=hr===0?12:hr>12?hr-12:hr;return`${h12}:${String(mn).padStart(2,"0")} ${ap}`};
 const SC={pending:"#94a3b8",accepted:"#22c55e",declined:"#ef4444",raincheck:"#f59e0b"};
 
-async function geocode(address){
+async function geocode(address,bias){
 if(!address||!address.trim())return null;
-const cacheKey=address.trim().toLowerCase().replace(/[^a-z0-9]/g,"_");
+// If query looks like just a venue name (no city/state/zip), append bias location
+let q=address.trim();
+const hasGeo=/\d{5}|,\s*[A-Z]{2}\b|,\s*\w+\s+(state|city|county)|portland|seattle|denver|austin|new york|los angeles|chicago|san francisco/i.test(q);
+if(!hasGeo&&bias)q=q+", "+bias;
+else if(!hasGeo)q=q+", Portland, OR";// default bias
+const cacheKey=q.toLowerCase().replace(/[^a-z0-9]/g,"_");
 const snap=await db.ref(P(`geocache/${cacheKey}`)).once("value");
 if(snap.val())return snap.val();
 try{
-const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`);
+const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
 const d=await r.json();
 if(d.length>0){const loc={lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon)};
 db.ref(P(`geocache/${cacheKey}`)).set(loc);return loc}
@@ -232,7 +237,7 @@ db.ref(CP(crewId,"busyTimes")).set(Object.keys(nb).length?nb:null);setMO(false)}
 const openAct=d=>{setAD(d);setATS("10:00");setATE("14:00");setADesc("");setALoc("");setAI([]);setActP("");setAMO(true)};
 const saveAct=async()=>{if(!ad||!adesc.trim())return;const an=isAdmin&&actP?actP:myName;if(!an)return;const dk=fD(cY,cM,ad);
 const inv=ai.length?ai:people.filter(p=>p.name!==an).map(p=>p.name);
-const loc=aloc.trim()?await geocode(aloc.trim()):null;
+const loc=aloc.trim()?await geocode(aloc.trim(),profile?.address):null;
 const na={person:an,date:dk,timeStart:ats,timeEnd:ate,description:adesc.trim(),location:aloc.trim()||"",coords:loc,invite:inv,id:Date.now(),uid:user.uid};
 db.ref(CP(crewId,"activities")).set([...acts,na]);sendNotif(db,an,inv,`${an} is doing "${adesc.trim()}"${aloc.trim()?" at "+aloc.trim():""} and invited you!`,allUsers,"activity",na.id);setAMO(false)};
 const delAct=id=>{const a=acts.find(x=>x.id===id);if(!canEdit&&a?.uid&&a.uid!==user.uid)return;const u=acts.filter(x=>x.id!==id);db.ref(CP(crewId,"activities")).set(u.length?u:null)};
@@ -259,7 +264,7 @@ if(aeDesc.trim())updated[idx].description=aeDesc.trim();
 updated[idx].timeStart=aeTS;updated[idx].timeEnd=aeTE;
 updated[idx].date=aeDate||updated[idx].date;
 updated[idx].location=aeLoc.trim();
-if(aeLoc.trim()){const loc=await geocode(aeLoc.trim());updated[idx].coords=loc}else{updated[idx].coords=null}
+if(aeLoc.trim()){const loc=await geocode(aeLoc.trim(),profile?.address);updated[idx].coords=loc}else{updated[idx].coords=null}
 db.ref(CP(crewId,"activities")).set(updated);
 setVA(updated[idx]);setActEdit(false)};
 
@@ -267,7 +272,7 @@ const startActEdit=(a)=>{setAEDesc(a.description||"");setAETS(a.timeStart||"10:0
 
 const submitProp=async()=>{if(!pDay)return;const to=pst.length?pst:people.filter(p=>p.name!==myName).map(p=>p.name);
 const resp={};to.forEach(n=>{resp[n]={status:"pending",note:"",hidden:false}});
-const loc=ploc.trim()?await geocode(ploc.trim()):null;
+const loc=ploc.trim()?await geocode(ploc.trim(),profile?.address):null;
 const np={person:myName,date:pDay,timeStart:pts2,timeEnd:pte,notes:pn,location:ploc.trim()||"",coords:loc,sendTo:to,responses:resp,id:Date.now(),uid:user.uid};
 db.ref(CP(crewId,"proposals")).set([...props,np]);
 sendNotif(db,myName,to,`${myName} proposed: ${pn||"let's kick it!"}${ploc.trim()?" at "+ploc.trim():""} on ${pDay}`,allUsers,"proposal",np.id);
@@ -1182,7 +1187,7 @@ else if(m.name!==myName&&map[m.name])map[m.name].crews.push(crew.name)})});
 return Object.values(map)},[crewData,userCrews,myName]);
 
 const submitXProp=async()=>{if(!xDay||xTo.length===0)return;
-const loc=xLoc.trim()?await geocode(xLoc.trim()):null;
+const loc=xLoc.trim()?await geocode(xLoc.trim(),profile?.address):null;
 const resp={};xTo.forEach(n=>{resp[n]={status:"pending",note:"",hidden:false}});
 const np={person:myName,date:xDay,timeStart:xTS,timeEnd:xTE,notes:xNote,location:xLoc.trim()||"",coords:loc,sendTo:xTo,responses:resp,id:Date.now(),uid:user.uid,_global:true};
 db.ref(P("globalProposals")).push(np);
