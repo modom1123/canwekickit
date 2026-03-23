@@ -910,7 +910,7 @@ const markersRef=useRef({});
 const today=new Date();
 const[acts,setActs]=useState([]);const[props,setProps]=useState([]);
 const[loading,setLoading]=useState(true);
-const[fM,setFM]=useState(null);const[fY,setFY]=useState(today.getFullYear());
+const[fM,setFM]=useState(today.getMonth());const[fY,setFY]=useState(today.getFullYear());
 const myName=profile?.name||"";
 const isAdmin=(profile?.email||"").toLowerCase()===ADMIN.toLowerCase();
 
