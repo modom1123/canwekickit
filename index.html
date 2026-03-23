@@ -907,8 +907,10 @@ style={{padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:600,cursor:"p
 function MapPage({user,profile,allUsers,people,crewId,onBack}){
 const mapRef=useRef(null);const mapInst=useRef(null);
 const markersRef=useRef({});
+const today=new Date();
 const[acts,setActs]=useState([]);const[props,setProps]=useState([]);
 const[loading,setLoading]=useState(true);
+const[fM,setFM]=useState(null);const[fY,setFY]=useState(today.getFullYear());
 const myName=profile?.name||"";
 const isAdmin=(profile?.email||"").toLowerCase()===ADMIN.toLowerCase();
 
@@ -933,11 +935,15 @@ if(!mapInst.current)return;
 const map=mapInst.current;
 map.eachLayer(l=>{if(l instanceof L.Marker||l instanceof L.CircleMarker)map.removeLayer(l)});
 markersRef.current={};
-const bounds=[];const today=new Date();
+const bounds=[];const td=new Date();
+const filterDate=(dateStr)=>{const[y,m,d]=dateStr.split("-").map(Number);const dt=new Date(y,m-1,d);
+if(dt<td)return false;
+if(fM!==null&&(m-1!==fM||y!==fY))return false;
+return true};
 
 const makeIcon=(color)=>L.divIcon({className:"",html:`<div style="width:28px;height:28px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center"></div>`,iconSize:[28,28],iconAnchor:[14,14]});
 
-acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=today&&a.coords}).forEach(a=>{
+acts.filter(a=>a.coords&&filterDate(a.date)).forEach(a=>{
 const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
 const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 const mk=L.marker([a.coords.lat,a.coords.lng],{icon:makeIcon(c)}).addTo(map);
@@ -945,7 +951,7 @@ mk.bindPopup(`<div style="font-family:'DM Sans',sans-serif;min-width:180px"><div
 markersRef.current[`act-${a.id}`]=mk;
 bounds.push([a.coords.lat,a.coords.lng])});
 
-props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=today&&p.coords}).forEach(pr=>{
+props.filter(p=>p.coords&&filterDate(p.date)).forEach(pr=>{
 const c=people.find(p=>p.name===pr.person)?.color||"#60a5fa";
 const[y,m,d]=pr.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 const resp=pr.responses||{};const accepted=Object.entries(resp).filter(([,r])=>r.status==="accepted").length;
@@ -957,7 +963,7 @@ bounds.push([pr.coords.lat,pr.coords.lng])});
 const adminProfile=Object.values(allUsers).find(u=>(u.email||"").toLowerCase()===ADMIN.toLowerCase());
 Object.values(allUsers).filter(u=>u.name&&u.address&&u.address.trim()).forEach(u=>{
 if(!isAdmin&&adminProfile&&u.name===adminProfile.name)return;
-const c=people.find(p=>p.name===u.name)?.color||"#94a3b8";
+const c=u.color||people.find(p=>p.name===u.name)?.color||"#94a3b8";
 geocode(u.address).then(loc=>{if(loc&&mapInst.current){
 const mk=L.marker([loc.lat,loc.lng],{icon:L.divIcon({className:"",html:`<svg width="24" height="34" viewBox="0 0 24 34" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 22 12 22s12-13 12-22C24 5.4 18.6 0 12 0z" fill="${c}"/><circle cx="12" cy="12" r="5" fill="#fff"/></svg>`,iconSize:[24,34],iconAnchor:[12,34],popupAnchor:[0,-30]})}).addTo(mapInst.current);
 mk.bindPopup(`<div style="font-family:'DM Sans',sans-serif"><div style="font-weight:700;color:${c}">${u.name}</div><div style="font-size:12px;color:#94a3b8;margin-top:2px">📍 general area</div></div>`);
@@ -967,23 +973,31 @@ if(bounds.length>1)mapInst.current.fitBounds(bounds,{padding:[40,40]})}})});
 if(bounds.length>1)setTimeout(()=>{if(mapInst.current)mapInst.current.fitBounds(bounds,{padding:[40,40]})},500);
 else if(bounds.length===1)setTimeout(()=>{if(mapInst.current)mapInst.current.setView(bounds[0],13)},500);
 setLoading(false);
-},[acts,props,people,allUsers]);
+},[acts,props,people,allUsers,fM,fY]);
 
 return(<div style={{fontFamily:"'DM Sans','Nunito',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#1e293b",padding:"24px 16px"}}><div style={{maxWidth:860,margin:"0 auto"}}>
 <button onClick={onBack} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:20}}>‹ back</button>
 <h1 style={{fontFamily:"'Nunito',sans-serif",fontSize:28,fontWeight:800,marginBottom:8,
 background:"linear-gradient(135deg,#e040fb,#4ECDC4)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>crew map</h1>
 <p style={{color:"#94a3b8",fontSize:14,marginBottom:16}}>activities, proposals, and your crew's general areas</p>
-<div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16,fontSize:12,color:"#64748b"}}>
+<div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:12,fontSize:12,color:"#64748b"}}>
 <span>● colored dots = activities & proposals</span>
 <span>📍 colored pins = friend areas</span>
+</div>
+<div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
+<span style={{fontSize:12,fontWeight:600,color:"#64748b"}}>filter:</span>
+<button onClick={()=>setFM(null)} style={{padding:"5px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",
+background:fM===null?"#e040fb":"#f8fafc",color:fM===null?"#fff":"#64748b",border:fM===null?"none":"1px solid #e2e8f0"}}>all upcoming</button>
+{MN.map((m,i)=>{const isActive=fM===i;return(
+<button key={i} onClick={()=>{setFM(i);setFY(i>=today.getMonth()?today.getFullYear():today.getFullYear()+1)}} style={{padding:"5px 10px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",
+background:isActive?"#e040fb":"#f8fafc",color:isActive?"#fff":"#94a3b8",border:isActive?"none":"1px solid #e2e8f0"}}>{m.slice(0,3)}</button>)})}
 </div>
 <div ref={mapRef} style={{height:480,borderRadius:12,border:"1px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",marginBottom:20,background:"#e2e8f0"}}/>
 {loading&&<p style={{color:"#94a3b8",fontSize:13,textAlign:"center"}}>loading map...</p>}
 <div style={{marginTop:8}}>
-{acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&a.location}).length>0&&(<>
+{acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);const dt=new Date(y,m-1,d);if(dt<new Date())return false;if(fM!==null&&(m-1!==fM||y!==fY))return false;return!!a.location}).length>0&&(<>
 <h3 style={{fontSize:16,fontWeight:700,marginBottom:8}}>upcoming activities with locations</h3>
-{acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&a.location}).map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
+{acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);const dt=new Date(y,m-1,d);if(dt<new Date())return false;if(fM!==null&&(m-1!==fM||y!==fY))return false;return!!a.location}).map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
 const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 return(<div key={a.id} onClick={()=>a.coords&&zoomTo(`act-${a.id}`)} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px solid ${c}`,cursor:a.coords?"pointer":"default"}}>
 <div style={{fontWeight:600,fontSize:13,color:c}}>★ {a.description}</div>
@@ -991,9 +1005,9 @@ return(<div key={a.id} onClick={()=>a.coords&&zoomTo(`act-${a.id}`)} style={{pad
 <div style={{fontSize:12,color:"#64748b"}}>📍 {a.location}</div>
 {a.coords&&<div style={{fontSize:10,color:c,marginTop:4}}>tap to view on map ↑</div>}
 </div>)})}</>)}
-{props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&p.location}).length>0&&(<>
+{props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);const dt=new Date(y,m-1,d);if(dt<new Date())return false;if(fM!==null&&(m-1!==fM||y!==fY))return false;return!!p.location}).length>0&&(<>
 <h3 style={{fontSize:16,fontWeight:700,marginBottom:8,marginTop:16}}>proposals with locations</h3>
-{props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&p.location}).map(pr=>{const c=people.find(p=>p.name===pr.person)?.color||"#60a5fa";
+{props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);const dt=new Date(y,m-1,d);if(dt<new Date())return false;if(fM!==null&&(m-1!==fM||y!==fY))return false;return!!p.location}).map(pr=>{const c=people.find(p=>p.name===pr.person)?.color||"#60a5fa";
 const[y,m,d]=pr.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 return(<div key={pr.id} onClick={()=>pr.coords&&zoomTo(`prop-${pr.id}`)} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px dashed ${c}`,cursor:pr.coords?"pointer":"default"}}>
 <div style={{fontWeight:600,fontSize:13,color:c}}>📩 {pr.notes||"hangout"}</div>
