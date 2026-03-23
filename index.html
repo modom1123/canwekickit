@@ -64,6 +64,31 @@ function Modal({isOpen,onClose,children}){if(!isOpen)return null;
 return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:28,minWidth:340,maxWidth:460,boxShadow:"0 25px 60px rgba(0,0,0,0.15)",maxHeight:"90vh",overflowY:"auto"}}>{children}</div></div>)}
 
+/* ===== MINI MAP PREVIEW ===== */
+function MiniMap({location,bias}){
+const ref=useRef(null);const mapRef=useRef(null);const mkRef=useRef(null);
+const[resolved,setResolved]=useState(null);const[loading,setLoading]=useState(false);const timerRef=useRef(null);
+useEffect(()=>{if(timerRef.current)clearTimeout(timerRef.current);
+if(!location||!location.trim()){setResolved(null);if(mkRef.current&&mapRef.current){mapRef.current.removeLayer(mkRef.current);mkRef.current=null}return}
+setLoading(true);
+timerRef.current=setTimeout(async()=>{const loc=await geocode(location,bias);
+if(loc){setResolved(loc);setLoading(false);
+if(!mapRef.current&&ref.current){const m=L.map(ref.current,{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false}).setView([loc.lat,loc.lng],15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(m);mapRef.current=m;setTimeout(()=>m.invalidateSize(),100)}
+if(mapRef.current){mapRef.current.setView([loc.lat,loc.lng],15);
+if(mkRef.current)mapRef.current.removeLayer(mkRef.current);
+mkRef.current=L.marker([loc.lat,loc.lng]).addTo(mapRef.current)}
+}else{setResolved(null);setLoading(false)}},600);
+return()=>{if(timerRef.current)clearTimeout(timerRef.current)}},[location,bias]);
+useEffect(()=>{return()=>{if(mapRef.current){mapRef.current.remove();mapRef.current=null}}},[]);
+if(!location||!location.trim())return null;
+return(<div style={{marginTop:8}}>
+{loading&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>finding location...</div>}
+{resolved&&!loading&&<div style={{fontSize:11,color:"#22c55e",marginBottom:4,fontWeight:600}}>✓ location found</div>}
+{!resolved&&!loading&&location.trim()&&<div style={{fontSize:11,color:"#f59e0b",marginBottom:4}}>location not found — try adding city/state</div>}
+<div ref={ref} style={{height:resolved?140:0,borderRadius:10,overflow:"hidden",border:resolved?"1px solid #e2e8f0":"none",transition:"height 0.3s"}}/>
+</div>)}
+
 /* ===== LANDING ===== */
 function Landing({onEnter}){return(<div onClick={onEnter} style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#0a0a0a",cursor:"pointer",userSelect:"none"}}>
 <img src="can_we_kick_it_transp.png" alt="logo" style={{maxWidth:"80vw",maxHeight:"60vh",objectFit:"contain"}}/>
@@ -493,7 +518,12 @@ delete crew</button>}
 {/* Month */}
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
 <button onClick={prevM} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18}}>‹</button>
-<h2 style={{fontSize:20,fontWeight:700,margin:0}}>{MN[cM]} {cY}</h2>
+<div style={{display:"flex",alignItems:"center",gap:6}}>
+<select value={cM} onChange={e=>setCM(parseInt(e.target.value))} style={{fontSize:18,fontWeight:700,border:"none",background:"none",color:"#1e293b",cursor:"pointer",outline:"none",fontFamily:"inherit",appearance:"none",WebkitAppearance:"none",padding:"4px 0",textAlign:"right"}}>
+{MN.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+<select value={cY} onChange={e=>setCY(parseInt(e.target.value))} style={{fontSize:18,fontWeight:700,border:"none",background:"none",color:"#1e293b",cursor:"pointer",outline:"none",fontFamily:"inherit",appearance:"none",WebkitAppearance:"none",padding:"4px 0"}}>
+{Array.from({length:5},(_,i)=>today.getFullYear()-1+i).map(y=><option key={y} value={y}>{y}</option>)}</select>
+</div>
 <button onClick={nextM} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18}}>›</button></div>
 <p style={{color:"#94a3b8",fontSize:13,textAlign:"center",marginBottom:16}}>add your available times, find when everyone's free</p>
 
@@ -542,7 +572,7 @@ borderRadius:4,padding:"2px 4px",fontWeight:600,borderLeft:`3px dashed ${stC}`,c
 {(()=>{const ua=acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=today});
 return!ua.length?<p style={{color:"#94a3b8",fontSize:14,fontStyle:"italic"}}>no upcoming activities</p>:
 ua.map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
-return(<div key={a.id} onClick={()=>{setVA(a);setActEdit(false);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{padding:"14px 16px",marginBottom:8,background:c+"08",borderRadius:12,borderLeft:`4px solid ${c}`,position:"relative",cursor:"pointer"}}>
+return(<div key={a.id} onClick={()=>{const[ay,am]=a.date.split("-").map(Number);setCM(am-1);setCY(ay);setVA(a);setActEdit(false);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{padding:"14px 16px",marginBottom:8,background:c+"08",borderRadius:12,borderLeft:`4px solid ${c}`,position:"relative",cursor:"pointer"}}>
 {(canEdit||!a.uid||a.uid===user.uid)&&<button onClick={e=>{e.stopPropagation();delAct(a.id)}} style={{position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>}
 <div style={{fontWeight:700,fontSize:14,color:c}}>{a.person}</div>
 <div style={{fontSize:13,color:"#475569",marginTop:2}}>{dl} · {fTD(pT(a.timeStart))} – {fTD(pT(a.timeEnd))}</div>
@@ -597,7 +627,8 @@ return<><button onClick={()=>setPST(allSel?[]:others.map(p=>p.name))} style={{pa
 <div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>notes</label>
 <textarea value={pn} onChange={e=>setPN(e.target.value)} placeholder="taco spot? movie night? park hangs?" rows={3} style={{...iS,resize:"vertical",fontFamily:"inherit"}}/></div>
 <div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>where? <span style={{fontWeight:400,color:"#94a3b8"}}>(optional)</span></label>
-<input value={ploc} onChange={e=>setPLoc(e.target.value)} placeholder="address, park, restaurant..." style={iS}/></div>
+<input value={ploc} onChange={e=>setPLoc(e.target.value)} placeholder="address, park, restaurant..." style={iS}/>
+<MiniMap location={ploc} bias={profile?.address}/></div>
 <button onClick={submitProp} disabled={!pDay} style={{...bP,alignSelf:"flex-start",background:!pDay?"#cbd5e1":"linear-gradient(135deg,#60a5fa,#4ecdc4)",cursor:!pDay?"not-allowed":"pointer"}}>can we kick it?</button></div>
 
 {/* Proposals list */}
@@ -700,7 +731,8 @@ return<><button onClick={()=>setAI(allSelected?[]:others.map(p=>p.name))} style=
 <div style={{marginBottom:20}}><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>what?</label>
 <input value={adesc} onChange={e=>setADesc(e.target.value)} placeholder="farmer's market, hiking, brunch..." style={iS}/></div>
 <div style={{marginBottom:20}}><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>where? <span style={{fontWeight:400,color:"#94a3b8"}}>(optional)</span></label>
-<input value={aloc} onChange={e=>setALoc(e.target.value)} placeholder="address, park name, restaurant..." style={iS}/></div>
+<input value={aloc} onChange={e=>setALoc(e.target.value)} placeholder="address, park name, restaurant..." style={iS}/>
+<MiniMap location={aloc} bias={profile?.address}/></div>
 <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button onClick={()=>setAMO(false)} style={{background:"#f8fafc",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer"}}>cancel</button>
 <button onClick={saveAct} disabled={!adesc.trim()} style={{...bP,background:!adesc.trim()?"#cbd5e1":myColor,cursor:!adesc.trim()?"not-allowed":"pointer"}}>can we kick it</button></div></Modal>
 
@@ -794,7 +826,8 @@ return(<>
 <div style={{flex:1}}><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>to</label>
 <input type="time" value={aeTE} onChange={e=>setAETE(e.target.value)} style={iS}/></div></div>
 <div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>where <span style={{fontWeight:400,color:"#94a3b8"}}>(optional)</span></label>
-<input value={aeLoc} onChange={e=>setAELoc(e.target.value)} placeholder="address, park, restaurant..." style={iS}/></div>
+<input value={aeLoc} onChange={e=>setAELoc(e.target.value)} placeholder="address, park, restaurant..." style={iS}/>
+<MiniMap location={aeLoc} bias={profile?.address}/></div>
 <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
 <button onClick={()=>setActEdit(false)} style={{background:"#f8fafc",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer"}}>cancel</button>
 <button onClick={()=>saveActEdit(a.id)} disabled={!aeDesc.trim()} style={{background:!aeDesc.trim()?"#cbd5e1":c,color:"#fff",border:"none",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,cursor:!aeDesc.trim()?"not-allowed":"pointer"}}>save</button>
@@ -1307,7 +1340,12 @@ return(<button key={c.id} onClick={()=>onSelectCrew(c.id)} style={{display:"flex
 {/* Month nav */}
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
 <button onClick={prevM} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18}}>‹</button>
-<h2 style={{fontSize:20,fontWeight:700,margin:0}}>{MN[cM]} {cY}</h2>
+<div style={{display:"flex",alignItems:"center",gap:6}}>
+<select value={cM} onChange={e=>setCM(parseInt(e.target.value))} style={{fontSize:18,fontWeight:700,border:"none",background:"none",color:"#1e293b",cursor:"pointer",outline:"none",fontFamily:"inherit",appearance:"none",WebkitAppearance:"none",padding:"4px 0",textAlign:"right"}}>
+{MN.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+<select value={cY} onChange={e=>setCY(parseInt(e.target.value))} style={{fontSize:18,fontWeight:700,border:"none",background:"none",color:"#1e293b",cursor:"pointer",outline:"none",fontFamily:"inherit",appearance:"none",WebkitAppearance:"none",padding:"4px 0"}}>
+{Array.from({length:5},(_,i)=>today.getFullYear()-1+i).map(y=><option key={y} value={y}>{y}</option>)}</select>
+</div>
 <button onClick={nextM} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,color:"#1e293b",padding:"8px 16px",cursor:"pointer",fontSize:18}}>›</button></div>
 
 {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8",fontSize:14}}>loading all crews...</div>:(<>
@@ -1426,7 +1464,8 @@ return<div key={n} style={{display:"flex",alignItems:"center",gap:4,background:c
 <div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>notes</label>
 <textarea value={xNote} onChange={e=>setXNote(e.target.value)} placeholder="what's the plan?" rows={2} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14,outline:"none",background:"#f8fafc",color:"#1e293b",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"}}/></div>
 <div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:6}}>where? <span style={{fontWeight:400,color:"#94a3b8"}}>(optional)</span></label>
-<input value={xLoc} onChange={e=>setXLoc(e.target.value)} placeholder="address, park, restaurant..." style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14,outline:"none",background:"#f8fafc",color:"#1e293b",boxSizing:"border-box"}}/></div>
+<input value={xLoc} onChange={e=>setXLoc(e.target.value)} placeholder="address, park, restaurant..." style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14,outline:"none",background:"#f8fafc",color:"#1e293b",boxSizing:"border-box"}}/>
+<MiniMap location={xLoc} bias={profile?.address}/></div>
 <button onClick={submitXProp} disabled={!xDay||xTo.length===0} style={{alignSelf:"flex-start",padding:"10px 22px",borderRadius:10,fontSize:14,fontWeight:600,cursor:(!xDay||xTo.length===0)?"not-allowed":"pointer",
 background:(!xDay||xTo.length===0)?"#cbd5e1":"linear-gradient(135deg,#e040fb,#60a5fa)",color:"#fff",border:"none",letterSpacing:0.3}}>can we kick it?</button>
 </div></div>
