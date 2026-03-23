@@ -182,6 +182,9 @@ const sRef=useRef(null);
 const[respModal,setRM]=useState(null);
 const[respMode,setRespMode]=useState(null);
 const[viewAct,setVA]=useState(null);
+const[actEdit,setActEdit]=useState(false);
+const[aeDesc,setAEDesc]=useState("");const[aeTS,setAETS]=useState("");const[aeTE,setAETE]=useState("");
+const[aeLoc,setAELoc]=useState("");const[aeDate,setAEDate]=useState("");
 const[actRespNote,setARN]=useState("");
 const[actRespMode,setARM]=useState(null);
 const[actRcDate,setActRcDate]=useState("");const[actRcTS,setActRcTS]=useState("14:00");const[actRcTE,setActRcTE]=useState("17:00");
@@ -205,7 +208,7 @@ return()=>{a.off();b.off();c.off();d.off();e.off()}},[crewId]);
 // Global proposals listener
 useEffect(()=>{const r=db.ref(P("globalProposals"));r.on("value",s=>{const d=s.val();setGProps(d?Object.values(d).filter(p=>p.person===myName||p.sendTo?.includes(myName)):[])}); return()=>r.off()},[myName]);
 useEffect(()=>{if(viewAct){const fresh=acts.find(a=>a.id===viewAct.id);if(fresh)setVA(fresh)}},[acts]);
-useEffect(()=>{if(openActId&&acts.length>0){const a=acts.find(x=>x.id===openActId);if(a){setVA(a);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00");if(clearOpenAct)clearOpenAct()}}},[openActId,acts]);
+useEffect(()=>{if(openActId&&acts.length>0){const a=acts.find(x=>x.id===openActId);if(a){setVA(a);setActEdit(false);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00");if(clearOpenAct)clearOpenAct()}}},[openActId,acts]);
 const recordSeen=(prId)=>{if(profile?.showReadReceipts===false)return;
 const idx=props.findIndex(p=>p.id===prId);if(idx===-1)return;
 const updated=JSON.parse(JSON.stringify(props));if(!updated[idx].seenBy)updated[idx].seenBy={};
@@ -248,6 +251,19 @@ const idx=acts.findIndex(a=>a.id===actId);if(idx===-1)return;
 const updated=JSON.parse(JSON.stringify(acts));
 if(updated[idx].responses?.[myName])updated[idx].responses[myName].hidden=true;
 db.ref(CP(crewId,"activities")).set(updated)};
+
+const saveActEdit=async(actId)=>{
+const idx=acts.findIndex(a=>a.id===actId);if(idx===-1)return;
+const updated=JSON.parse(JSON.stringify(acts));
+if(aeDesc.trim())updated[idx].description=aeDesc.trim();
+updated[idx].timeStart=aeTS;updated[idx].timeEnd=aeTE;
+updated[idx].date=aeDate||updated[idx].date;
+updated[idx].location=aeLoc.trim();
+if(aeLoc.trim()){const loc=await geocode(aeLoc.trim());updated[idx].coords=loc}else{updated[idx].coords=null}
+db.ref(CP(crewId,"activities")).set(updated);
+setVA(updated[idx]);setActEdit(false)};
+
+const startActEdit=(a)=>{setAEDesc(a.description||"");setAETS(a.timeStart||"10:00");setAETE(a.timeEnd||"14:00");setAELoc(a.location||"");setAEDate(a.date||"");setActEdit(true)};
 
 const submitProp=async()=>{if(!pDay)return;const to=pst.length?pst:people.filter(p=>p.name!==myName).map(p=>p.name);
 const resp={};to.forEach(n=>{resp[n]={status:"pending",note:"",hidden:false}});
@@ -498,7 +514,7 @@ style={{fontSize:9,background:p.color+"20",color:p.color,borderRadius:4,padding:
 {dA.map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";const myActSt=a.responses?.[myName]?.status;
 const chipC=myActSt==="accepted"?"#22c55e":myActSt==="declined"?"#94a3b8":myActSt==="raincheck"?"#f59e0b":c;
 return(
-<div key={a.id} onClick={e=>{e.stopPropagation();setVA(a);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{fontSize:9,background:chipC+"20",color:chipC,borderRadius:4,padding:"2px 4px",fontWeight:600,borderLeft:`3px solid ${chipC}`,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{myActSt==="accepted"?"✓":myActSt==="declined"?"✗":myActSt==="raincheck"?"⏳":"★"} {a.description.slice(0,12)}</div>)})}
+<div key={a.id} onClick={e=>{e.stopPropagation();setVA(a);setActEdit(false);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{fontSize:9,background:chipC+"20",color:chipC,borderRadius:4,padding:"2px 4px",fontWeight:600,borderLeft:`3px solid ${chipC}`,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{myActSt==="accepted"?"✓":myActSt==="declined"?"✗":myActSt==="raincheck"?"⏳":"★"} {a.description.slice(0,12)}</div>)})}
 {dP.map(pr=>{const sC=people.find(p=>p.name===pr.person)?.color||"#e040fb";const mySt=getMyStatus(pr);const stC=getStatusColor(mySt);
 return(<div key={pr.id} onClick={e=>{e.stopPropagation();setRM(pr);setRN("");setRCDate("");setRCTS("14:00");setRCTE("17:00");setRespMode(null);recordSeen(pr.id)}}
 style={{fontSize:9,background:mySt==="accepted"?"#22c55e20":mySt==="declined"?"#94a3b820":sC+"15",
@@ -521,7 +537,7 @@ borderRadius:4,padding:"2px 4px",fontWeight:600,borderLeft:`3px dashed ${stC}`,c
 {(()=>{const ua=acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=today});
 return!ua.length?<p style={{color:"#94a3b8",fontSize:14,fontStyle:"italic"}}>no upcoming activities</p>:
 ua.map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
-return(<div key={a.id} onClick={()=>{setVA(a);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{padding:"14px 16px",marginBottom:8,background:c+"08",borderRadius:12,borderLeft:`4px solid ${c}`,position:"relative",cursor:"pointer"}}>
+return(<div key={a.id} onClick={()=>{setVA(a);setActEdit(false);setARM(null);setARN("");setActRcDate("");setActRcTS("14:00");setActRcTE("17:00")}} style={{padding:"14px 16px",marginBottom:8,background:c+"08",borderRadius:12,borderLeft:`4px solid ${c}`,position:"relative",cursor:"pointer"}}>
 {(canEdit||!a.uid||a.uid===user.uid)&&<button onClick={e=>{e.stopPropagation();delAct(a.id)}} style={{position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>}
 <div style={{fontWeight:700,fontSize:14,color:c}}>{a.person}</div>
 <div style={{fontSize:13,color:"#475569",marginTop:2}}>{dl} · {fTD(pT(a.timeStart))} – {fTD(pT(a.timeEnd))}</div>
@@ -751,16 +767,40 @@ return(<span key={name} style={{fontSize:12,color:pc,fontWeight:600}}>{name}</sp
 </Modal>
 
 {/* ACTIVITY DETAIL MODAL */}
-<Modal isOpen={viewAct!==null} onClose={()=>setVA(null)}>
+<Modal isOpen={viewAct!==null} onClose={()=>{setVA(null);setActEdit(false)}}>
 {viewAct&&(()=>{
 const a=viewAct;const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
 const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 const isOwner2=a.person===myName;const isInvited=Array.isArray(a.invite)?a.invite.includes(myName):false;
+const canEditAct=isOwner2||canEdit;
 const resp=a.responses||{};const myResp=resp[myName]?.status;
 return(<>
+{/* Edit mode */}
+{actEdit?(<>
+<h3 style={{margin:"0 0 12px",fontSize:18,fontWeight:700,color:c}}>edit activity</h3>
+<div style={{display:"flex",flexDirection:"column",gap:12}}>
+<div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>what</label>
+<input value={aeDesc} onChange={e=>setAEDesc(e.target.value)} style={iS}/></div>
+<div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>date</label>
+<input type="date" value={aeDate} onChange={e=>setAEDate(e.target.value)} style={iS}/></div>
+<div style={{display:"flex",gap:12}}>
+<div style={{flex:1}}><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>from</label>
+<input type="time" value={aeTS} onChange={e=>setAETS(e.target.value)} style={iS}/></div>
+<div style={{flex:1}}><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>to</label>
+<input type="time" value={aeTE} onChange={e=>setAETE(e.target.value)} style={iS}/></div></div>
+<div><label style={{fontSize:12,fontWeight:600,color:"#64748b",display:"block",marginBottom:4}}>where <span style={{fontWeight:400,color:"#94a3b8"}}>(optional)</span></label>
+<input value={aeLoc} onChange={e=>setAELoc(e.target.value)} placeholder="address, park, restaurant..." style={iS}/></div>
+<div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+<button onClick={()=>setActEdit(false)} style={{background:"#f8fafc",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 18px",fontSize:14,cursor:"pointer"}}>cancel</button>
+<button onClick={()=>saveActEdit(a.id)} disabled={!aeDesc.trim()} style={{background:!aeDesc.trim()?"#cbd5e1":c,color:"#fff",border:"none",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,cursor:!aeDesc.trim()?"not-allowed":"pointer"}}>save</button>
+</div></div>
+</>):(<>
+{/* View mode */}
 <h3 style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:c}}>★ {a.description}</h3>
 <div style={{marginTop:8}}>
-<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:10,height:10,borderRadius:"50%",background:c}}/><span style={{fontSize:14,fontWeight:600}}>{a.person}</span></div>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:10,height:10,borderRadius:"50%",background:c}}/><span style={{fontSize:14,fontWeight:600}}>{a.person}</span>
+{canEditAct&&<button onClick={()=>startActEdit(a)} style={{marginLeft:"auto",background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:600,color:"#64748b",cursor:"pointer"}}>edit</button>}
+</div>
 <div style={{fontSize:13,color:"#475569"}}>{dl} · {fTD(pT(a.timeStart))} – {fTD(pT(a.timeEnd))}</div>
 {a.location&&<div style={{fontSize:13,color:"#64748b",marginTop:4}}>📍 {a.location}</div>}
 {a.invite&&<div style={{fontSize:13,color:"#94a3b8",marginTop:6}}>invited: {Array.isArray(a.invite)?a.invite.join(", "):a.invite}</div>}
@@ -816,6 +856,7 @@ style={{padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:600,cursor:"p
 <div style={{marginTop:12,padding:"10px 14px",background:SC[myResp]+"15",borderRadius:10,display:"flex",alignItems:"center",gap:8}}>
 <div style={{width:10,height:10,borderRadius:"50%",background:SC[myResp]||"#94a3b8"}}/>
 <span style={{fontSize:14,fontWeight:600,color:SC[myResp]||"#94a3b8"}}>you responded: {myResp==="accepted"?"yes we can!":myResp==="declined"?"womp womp":"raincheck?"}</span></div>)}
+</>)}
 </>)})()}
 </Modal>
 
