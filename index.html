@@ -540,7 +540,10 @@ return(<div key={day} onClick={()=>setCD(day)} style={{minHeight:72,borderRadius
 background:isT?"rgba(224,64,251,0.06)":isPast?"#f8fafc":"#fff",opacity:isPast?0.5:1,
 border:hA?`2px solid ${aC}`:isT?"1.5px solid rgba(224,64,251,0.35)":"1px solid #f1f5f9",cursor:"pointer",transition:"background 0.15s"}}
 onMouseEnter={e=>{if(!isPast)e.currentTarget.style.background="#f1f5f9"}} onMouseLeave={e=>{e.currentTarget.style.background=isT?"rgba(224,64,251,0.06)":isPast?"#f8fafc":"#fff"}}>
-<div style={{fontSize:13,fontWeight:isT?700:500,color:isT?"#e040fb":isPast?"#cbd5e1":"#475569"}}>{day}</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<span style={{fontSize:13,fontWeight:isT?700:500,color:isT?"#e040fb":isPast?"#cbd5e1":"#475569"}}>{day}</span>
+{dA.length>0&&!isPast&&<span style={{fontSize:10,color:aC||"#f59e0b"}}>★</span>}
+</div>
 <div style={{display:"flex",flexDirection:"column",gap:2,marginTop:3}}>
 {people.map(p=>{const dk=fD(cY,cM,day);return(bt[p.name]?.[dk]||[]).map((en,idx)=>(
 <div key={`${p.name}-${idx}`} onClick={e=>{e.stopPropagation();editBusy(p.name,dk,idx)}}
@@ -903,6 +906,7 @@ style={{padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:600,cursor:"p
 /* ===== MAP PAGE ===== */
 function MapPage({user,profile,allUsers,people,crewId,onBack}){
 const mapRef=useRef(null);const mapInst=useRef(null);
+const markersRef=useRef({});
 const[acts,setActs]=useState([]);const[props,setProps]=useState([]);
 const[loading,setLoading]=useState(true);
 const myName=profile?.name||"";
@@ -922,10 +926,13 @@ mapInst.current=map;
 setTimeout(()=>map.invalidateSize(),100);
 return()=>{if(mapInst.current){mapInst.current.remove();mapInst.current=null}}},[]);
 
+const zoomTo=(id)=>{const mk=markersRef.current[id];if(mk&&mapInst.current){mapInst.current.setView(mk.getLatLng(),15);mk.openPopup()}};
+
 useEffect(()=>{
 if(!mapInst.current)return;
 const map=mapInst.current;
 map.eachLayer(l=>{if(l instanceof L.Marker||l instanceof L.CircleMarker)map.removeLayer(l)});
+markersRef.current={};
 const bounds=[];const today=new Date();
 
 const makeIcon=(color)=>L.divIcon({className:"",html:`<div style="width:28px;height:28px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center"></div>`,iconSize:[28,28],iconAnchor:[14,14]});
@@ -935,6 +942,7 @@ const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
 const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 const mk=L.marker([a.coords.lat,a.coords.lng],{icon:makeIcon(c)}).addTo(map);
 mk.bindPopup(`<div style="font-family:'DM Sans',sans-serif;min-width:180px"><div style="font-weight:700;color:${c}">★ ${a.description}</div><div style="font-size:12px;color:#475569;margin-top:4px">${a.person} · ${dl}</div><div style="font-size:12px;color:#475569">${fTD(pT(a.timeStart))} – ${fTD(pT(a.timeEnd))}</div>${a.location?`<div style="font-size:12px;color:#64748b;margin-top:4px">📍 ${a.location}</div>`:""}</div>`);
+markersRef.current[`act-${a.id}`]=mk;
 bounds.push([a.coords.lat,a.coords.lng])});
 
 props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=today&&p.coords}).forEach(pr=>{
@@ -943,6 +951,7 @@ const[y,m,d]=pr.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleD
 const resp=pr.responses||{};const accepted=Object.entries(resp).filter(([,r])=>r.status==="accepted").length;
 const mk=L.marker([pr.coords.lat,pr.coords.lng],{icon:makeIcon(c)}).addTo(map);
 mk.bindPopup(`<div style="font-family:'DM Sans',sans-serif;min-width:180px"><div style="font-weight:700;color:${c}">📩 ${pr.notes||"hangout"}</div><div style="font-size:12px;color:#475569;margin-top:4px">${pr.person} · ${dl}</div><div style="font-size:12px;color:#475569">${fTD(pT(pr.timeStart))} – ${fTD(pT(pr.timeEnd))}</div>${pr.location?`<div style="font-size:12px;color:#64748b;margin-top:4px">📍 ${pr.location}</div>`:""}<div style="font-size:11px;color:#22c55e;margin-top:4px">${accepted} confirmed</div></div>`);
+markersRef.current[`prop-${pr.id}`]=mk;
 bounds.push([pr.coords.lat,pr.coords.lng])});
 
 const adminProfile=Object.values(allUsers).find(u=>(u.email||"").toLowerCase()===ADMIN.toLowerCase());
@@ -950,7 +959,7 @@ Object.values(allUsers).filter(u=>u.name&&u.address&&u.address.trim()).forEach(u
 if(!isAdmin&&adminProfile&&u.name===adminProfile.name)return;
 const c=people.find(p=>p.name===u.name)?.color||"#94a3b8";
 geocode(u.address).then(loc=>{if(loc&&mapInst.current){
-const mk=L.circleMarker([loc.lat,loc.lng],{radius:10,fillColor:c,color:"#fff",weight:2,opacity:1,fillOpacity:0.7}).addTo(mapInst.current);
+const mk=L.marker([loc.lat,loc.lng],{icon:L.divIcon({className:"",html:`<svg width="24" height="34" viewBox="0 0 24 34" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 22 12 22s12-13 12-22C24 5.4 18.6 0 12 0z" fill="${c}"/><circle cx="12" cy="12" r="5" fill="#fff"/></svg>`,iconSize:[24,34],iconAnchor:[12,34],popupAnchor:[0,-30]})}).addTo(mapInst.current);
 mk.bindPopup(`<div style="font-family:'DM Sans',sans-serif"><div style="font-weight:700;color:${c}">${u.name}</div><div style="font-size:12px;color:#94a3b8;margin-top:2px">📍 general area</div></div>`);
 bounds.push([loc.lat,loc.lng]);
 if(bounds.length>1)mapInst.current.fitBounds(bounds,{padding:[40,40]})}})});
@@ -966,8 +975,8 @@ return(<div style={{fontFamily:"'DM Sans','Nunito',sans-serif",background:"#f8fa
 background:"linear-gradient(135deg,#e040fb,#4ECDC4)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>crew map</h1>
 <p style={{color:"#94a3b8",fontSize:14,marginBottom:16}}>activities, proposals, and your crew's general areas</p>
 <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16,fontSize:12,color:"#64748b"}}>
-<span>● colored circles = activities & proposals</span>
-<span>○ faded circles = friend areas</span>
+<span>● colored dots = activities & proposals</span>
+<span>📍 colored pins = friend areas</span>
 </div>
 <div ref={mapRef} style={{height:480,borderRadius:12,border:"1px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",marginBottom:20,background:"#e2e8f0"}}/>
 {loading&&<p style={{color:"#94a3b8",fontSize:13,textAlign:"center"}}>loading map...</p>}
@@ -976,18 +985,22 @@ background:"linear-gradient(135deg,#e040fb,#4ECDC4)",WebkitBackgroundClip:"text"
 <h3 style={{fontSize:16,fontWeight:700,marginBottom:8}}>upcoming activities with locations</h3>
 {acts.filter(a=>{const[y,m,d]=a.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&a.location}).map(a=>{const c=people.find(p=>p.name===a.person)?.color||"#e040fb";
 const[y,m,d]=a.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-return(<div key={a.id} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px solid ${c}`}}>
+return(<div key={a.id} onClick={()=>a.coords&&zoomTo(`act-${a.id}`)} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px solid ${c}`,cursor:a.coords?"pointer":"default"}}>
 <div style={{fontWeight:600,fontSize:13,color:c}}>★ {a.description}</div>
 <div style={{fontSize:12,color:"#475569"}}>{a.person} · {dl} · {fTD(pT(a.timeStart))} – {fTD(pT(a.timeEnd))}</div>
-<div style={{fontSize:12,color:"#64748b"}}>📍 {a.location}</div></div>)})}</>)}
+<div style={{fontSize:12,color:"#64748b"}}>📍 {a.location}</div>
+{a.coords&&<div style={{fontSize:10,color:c,marginTop:4}}>tap to view on map ↑</div>}
+</div>)})}</>)}
 {props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&p.location}).length>0&&(<>
 <h3 style={{fontSize:16,fontWeight:700,marginBottom:8,marginTop:16}}>proposals with locations</h3>
 {props.filter(p=>{const[y,m,d]=p.date.split("-").map(Number);return new Date(y,m-1,d)>=new Date()&&p.location}).map(pr=>{const c=people.find(p=>p.name===pr.person)?.color||"#60a5fa";
 const[y,m,d]=pr.date.split("-").map(Number);const dl=new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-return(<div key={pr.id} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px dashed ${c}`}}>
+return(<div key={pr.id} onClick={()=>pr.coords&&zoomTo(`prop-${pr.id}`)} style={{padding:"10px 14px",marginBottom:6,background:c+"08",borderRadius:10,borderLeft:`4px dashed ${c}`,cursor:pr.coords?"pointer":"default"}}>
 <div style={{fontWeight:600,fontSize:13,color:c}}>📩 {pr.notes||"hangout"}</div>
 <div style={{fontSize:12,color:"#475569"}}>{pr.person} · {dl} · {fTD(pT(pr.timeStart))} – {fTD(pT(pr.timeEnd))}</div>
-<div style={{fontSize:12,color:"#64748b"}}>📍 {pr.location}</div></div>)})}</>)}
+<div style={{fontSize:12,color:"#64748b"}}>📍 {pr.location}</div>
+{pr.coords&&<div style={{fontSize:10,color:c,marginTop:4}}>tap to view on map ↑</div>}
+</div>)})}</>)}
 </div>
 </div></div>)}
 
@@ -1365,7 +1378,10 @@ background:isT?"rgba(224,64,251,0.06)":isPast?"#f8fafc":"#fff",opacity:isPast?0.
 border:hasOverlap&&!isPast?"2px solid #e040fb":isT?"1.5px solid rgba(224,64,251,0.35)":"1px solid #f1f5f9",cursor:"default",transition:"background 0.15s"}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
 <span style={{fontSize:13,fontWeight:isT?700:500,color:isT?"#e040fb":isPast?"#cbd5e1":"#475569"}}>{day}</span>
+<div style={{display:"flex",gap:2}}>
+{items.some(i=>i.type==="act")&&!isPast&&<span style={{fontSize:10,color:"#f59e0b"}}>★</span>}
 {hasOverlap&&!isPast&&<span style={{fontSize:8,color:"#e040fb",fontWeight:700}}>●</span>}
+</div>
 </div>
 <div style={{display:"flex",flexDirection:"column",gap:2,marginTop:3}}>
 {items.slice(0,3).map((item,idx)=>{
